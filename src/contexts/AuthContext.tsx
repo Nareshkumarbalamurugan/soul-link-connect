@@ -8,7 +8,8 @@ import {
   signOut,
   onAuthStateChanged
 } from 'firebase/auth';
-import { doc, setDoc, getDoc } from 'firebase/firestore';
+import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { getCurrentLocation, Location } from '../utils/geolocation';
 
 interface UserProfile {
   id: string;
@@ -16,17 +17,20 @@ interface UserProfile {
   email: string;
   gender: 'male' | 'female' | 'other';
   languages: string[];
-  location: string;
+  location: string | Location;
   role: 'seeker' | 'helper';
   isAvailable?: boolean;
+  isOnline?: boolean;
+  lastSeen?: Date;
 }
 
 interface AuthContextType {
   currentUser: User | null;
   userProfile: UserProfile | null;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email'>) => Promise<void>;
+  signup: (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email' | 'isOnline' | 'lastSeen'>) => Promise<void>;
   logout: () => Promise<void>;
+  updateUserLocation: () => Promise<void>;
   loading: boolean;
 }
 
@@ -41,16 +45,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
 
-  const signup = async (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email'>) => {
+  const updateUserLocation = async () => {
+    if (!userProfile) return;
+
+    try {
+      const location = await getCurrentLocation();
+      await updateDoc(doc(db, 'users', userProfile.id), {
+        location: location
+      });
+      setUserProfile(prev => prev ? { ...prev, location } : null);
+    } catch (error) {
+      console.error('Error updating location:', error);
+    }
+  };
+
+  const updateOnlineStatus = async (userId: string, isOnline: boolean) => {
+    try {
+      await updateDoc(doc(db, 'users', userId), {
+        isOnline: isOnline,
+        lastSeen: serverTimestamp()
+      });
+    } catch (error) {
+      console.error('Error updating online status:', error);
+    }
+  };
+
+  const signup = async (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email' | 'isOnline' | 'lastSeen'>) => {
     const { user } = await createUserWithEmailAndPassword(auth, email, password);
     
     const profile: UserProfile = {
       id: user.uid,
       email: user.email!,
+      isOnline: true,
+      lastSeen: new Date(),
       ...profileData
     };
     
-    await setDoc(doc(db, 'users', user.uid), profile);
+    await setDoc(doc(db, 'users', user.uid), {
+      ...profile,
+      lastSeen: serverTimestamp()
+    });
     setUserProfile(profile);
   };
 
@@ -59,6 +93,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
+    if (userProfile) {
+      await updateOnlineStatus(userProfile.id, false);
+    }
     await signOut(auth);
     setUserProfile(null);
   };
@@ -70,7 +107,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (user) {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (userDoc.exists()) {
-          setUserProfile(userDoc.data() as UserProfile);
+          const profile = userDoc.data() as UserProfile;
+          setUserProfile(profile);
+          await updateOnlineStatus(user.uid, true);
         }
       } else {
         setUserProfile(null);
@@ -79,8 +118,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    return unsubscribe;
-  }, []);
+    // Update online status when tab is about to close
+    const handleBeforeUnload = () => {
+      if (userProfile) {
+        updateOnlineStatus(userProfile.id, false);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+
+    return () => {
+      unsubscribe();
+      window.removeEventListener('beforeunload', handleBeforeUnload);
+    };
+  }, [userProfile?.id]);
 
   const value = {
     currentUser,
@@ -88,6 +139,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     login,
     signup,
     logout,
+    updateUserLocation,
     loading
   };
 
