@@ -3,16 +3,17 @@ import React from 'react';
 import { Card, CardContent } from './ui/card';
 import { Button } from './ui/button';
 import { Badge } from './ui/badge';
-import { MessageCircle, Phone } from 'lucide-react';
+import { MessageCircle, Phone, Globe, MapPin } from 'lucide-react';
 
 interface ProfileCardProps {
   name: string;
   gender: string;
   languages: string[];
   location: string;
-  isAvailable?: boolean;
-  onChat?: () => void;
-  onCall?: () => void;
+  isAvailable: boolean;
+  isOnline?: boolean;
+  onChat: () => void;
+  onCall: () => void;
 }
 
 const ProfileCard: React.FC<ProfileCardProps> = ({
@@ -20,60 +21,77 @@ const ProfileCard: React.FC<ProfileCardProps> = ({
   gender,
   languages,
   location,
-  isAvailable = true,
+  isAvailable,
+  isOnline,
   onChat,
   onCall
 }) => {
-  const getAvatarColor = () => {
-    const colors = ['bg-purple-200', 'bg-blue-200', 'bg-green-200', 'bg-pink-200'];
-    return colors[name.length % colors.length];
+  const getAvatarColor = (gender: string) => {
+    switch (gender.toLowerCase()) {
+      case 'male': return 'bg-blue-200';
+      case 'female': return 'bg-pink-200';
+      default: return 'bg-purple-200';
+    }
   };
 
+  const isReallyAvailable = isAvailable && isOnline;
+
   return (
-    <Card className="p-4 hover:shadow-lg transition-all duration-300 border-purple-100">
-      <CardContent className="p-0">
-        <div className="flex items-center space-x-4 mb-4">
-          <div className={`w-16 h-16 rounded-full ${getAvatarColor()} flex items-center justify-center text-gray-700 font-semibold text-lg`}>
-            {name.charAt(0).toUpperCase()}
+    <Card className={`transition-all duration-200 hover:shadow-lg ${
+      isReallyAvailable ? 'border-green-200 bg-green-50' : 'border-gray-200 bg-gray-50'
+    }`}>
+      <CardContent className="p-4">
+        <div className="flex items-center space-x-3 mb-3">
+          <div className={`w-12 h-12 ${getAvatarColor(gender)} rounded-full flex items-center justify-center relative`}>
+            <span className="text-gray-700 font-semibold text-lg">
+              {name.charAt(0).toUpperCase()}
+            </span>
+            {/* Online indicator */}
+            <div className={`absolute -bottom-1 -right-1 w-4 h-4 rounded-full border-2 border-white ${
+              isOnline ? 'bg-green-500' : 'bg-gray-400'
+            }`} />
           </div>
           <div className="flex-1">
-            <h3 className="text-lg font-semibold text-gray-800">{name}</h3>
-            <p className="text-gray-600 text-sm">{gender}, {location}</p>
-          </div>
-          {isAvailable && (
-            <Badge variant="outline" className="bg-green-50 text-green-700 border-green-200">
-              Available
-            </Badge>
-          )}
-        </div>
-        
-        <div className="mb-4">
-          <p className="text-sm text-gray-600 mb-2">Languages:</p>
-          <div className="flex flex-wrap gap-2">
-            {languages.map((lang, index) => (
-              <Badge key={index} variant="secondary" className="bg-purple-50 text-purple-700">
-                {lang}
+            <h3 className="font-semibold text-gray-800">{name}</h3>
+            <div className="flex items-center space-x-2 mt-1">
+              <Badge variant={isReallyAvailable ? "default" : "secondary"} className="text-xs">
+                {isReallyAvailable ? 'Available' : isOnline ? 'Busy' : 'Offline'}
               </Badge>
-            ))}
+              <Badge variant="outline" className="text-xs capitalize">
+                {gender}
+              </Badge>
+            </div>
           </div>
         </div>
-        
+
+        <div className="space-y-2 mb-4">
+          <div className="flex items-center space-x-2 text-sm text-gray-600">
+            <Globe className="w-4 h-4" />
+            <span>{languages.join(', ')}</span>
+          </div>
+          <div className="flex items-center space-x-2 text-sm text-gray-600">
+            <MapPin className="w-4 h-4" />
+            <span>{location}</span>
+          </div>
+        </div>
+
         <div className="flex space-x-2">
-          <Button 
+          <Button
             onClick={onChat}
-            className="flex-1 bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
-            size="sm"
+            disabled={!isReallyAvailable}
+            className="flex-1"
+            variant={isReallyAvailable ? "default" : "secondary"}
           >
-            <MessageCircle className="w-4 h-4 mr-2" />
+            <MessageCircle className="w-4 h-4 mr-1" />
             Chat
           </Button>
-          <Button 
+          <Button
             onClick={onCall}
+            disabled={!isReallyAvailable}
             variant="outline"
-            size="sm"
-            className="flex-1 border-purple-200 text-purple-600 hover:bg-purple-50"
+            className="flex-1"
           >
-            <Phone className="w-4 h-4 mr-2" />
+            <Phone className="w-4 h-4 mr-1" />
             Call
           </Button>
         </div>

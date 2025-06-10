@@ -1,7 +1,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { db } from '../config/firebase';
-import { collection, query, where, getDocs, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
 import ProfileCard from './ProfileCard';
 import ChatWindow from './ChatWindow';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -19,6 +19,7 @@ interface Helper {
   languages: string[];
   location: string | Location;
   isAvailable: boolean;
+  isOnline?: boolean;
   distance?: number | null;
 }
 
@@ -38,7 +39,28 @@ const SeekerDashboard: React.FC = () => {
   }, []);
 
   useEffect(() => {
-    fetchHelpers();
+    // Set up real-time listener for helpers
+    const helpersQuery = query(
+      collection(db, 'users'),
+      where('role', '==', 'helper')
+    );
+    
+    const unsubscribe = onSnapshot(helpersQuery, (snapshot) => {
+      let helpersData = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data()
+      } as Helper));
+
+      // Sort helpers by distance (nearby first) if location is available
+      if (userLocation) {
+        helpersData = sortHelpersByDistance(helpersData, userLocation);
+      }
+      
+      setHelpers(helpersData);
+      setLoading(false);
+    });
+
+    return () => unsubscribe();
   }, [userLocation]);
 
   useEffect(() => {
@@ -55,34 +77,6 @@ const SeekerDashboard: React.FC = () => {
       console.error('Error getting location:', error);
       toast.error('Location access denied. Showing all helpers');
       setLocationEnabled(false);
-    }
-  };
-
-  const fetchHelpers = async () => {
-    try {
-      const helpersQuery = query(
-        collection(db, 'users'),
-        where('role', '==', 'helper'),
-        where('isAvailable', '==', true)
-      );
-      
-      const snapshot = await getDocs(helpersQuery);
-      let helpersData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as Helper));
-
-      // Sort helpers by distance (nearby first) if location is available
-      if (userLocation) {
-        helpersData = sortHelpersByDistance(helpersData, userLocation);
-      }
-      
-      setHelpers(helpersData);
-    } catch (error) {
-      console.error('Error fetching helpers:', error);
-      toast.error('Failed to load available helpers');
-    } finally {
-      setLoading(false);
     }
   };
 
@@ -115,9 +109,10 @@ const SeekerDashboard: React.FC = () => {
         lastMessageTime: serverTimestamp()
       });
 
+      const helper = helpers.find(h => h.id === helperId);
       setActiveChat({
         chatId: chatRef.id,
-        otherUser: { id: helperId, name: helperName, isOnline: true }
+        otherUser: { id: helperId, name: helperName, isOnline: helper?.isOnline }
       });
 
       toast.success(`Starting chat with ${helperName}...`);
@@ -129,7 +124,9 @@ const SeekerDashboard: React.FC = () => {
 
   const handleCall = (helperId: string, helperName: string) => {
     toast.success(`Initiating call with ${helperName}...`);
-    // Here you would implement the call functionality
+    // Create a direct call room
+    const roomId = `${userProfile?.id}-${helperId}-${Date.now()}`;
+    window.open(`https://meet.jit.si/SoulLink-Call-${roomId}`, '_blank');
   };
 
   if (loading) {
@@ -165,7 +162,14 @@ const SeekerDashboard: React.FC = () => {
               <h3 className="text-lg font-semibold text-red-800 mb-2">Need Immediate Help?</h3>
               <p className="text-red-600 text-sm">Connect instantly with an available helper</p>
             </div>
-            <Button className="bg-red-600 hover:bg-red-700 text-white">
+            <Button 
+              className="bg-red-600 hover:bg-red-700 text-white"
+              onClick={() => {
+                const emergencyRoom = `emergency-${userProfile?.id}-${Date.now()}`;
+                window.open(`https://meet.jit.si/SoulLink-Emergency-${emergencyRoom}`, '_blank');
+                toast.success('Opening emergency call room...');
+              }}
+            >
               <Phone className="w-4 h-4 mr-2" />
               Emergency Call
             </Button>
@@ -195,7 +199,7 @@ const SeekerDashboard: React.FC = () => {
         <CardHeader>
           <div className="flex justify-between items-center">
             <CardTitle className="text-2xl font-bold text-gray-800 flex items-center space-x-2">
-              <span>Available Helpers</span>
+              <span>Available Helpers ({filteredHelpers.length})</span>
               {locationEnabled && (
                 <div className="flex items-center space-x-1 text-sm font-normal text-green-600">
                   <Star className="w-4 h-4" />
@@ -265,9 +269,10 @@ const SeekerDashboard: React.FC = () => {
                     languages={helper.languages}
                     location={typeof helper.location === 'string' ? helper.location : 
                       helper.distance !== null ? `${helper.distance} km away` : 'Location unknown'}
-                    isAvailable={helper.isAvailable}
+                    isAvailable={helper.isAvailable && helper.isOnline}
                     onChat={() => handleChat(helper.id, helper.name)}
                     onCall={() => handleCall(helper.id, helper.name)}
+                    isOnline={helper.isOnline}
                   />
                 </div>
               ))}

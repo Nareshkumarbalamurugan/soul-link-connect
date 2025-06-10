@@ -5,6 +5,8 @@ import {
   User,
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
+  signInWithPopup,
+  GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
   sendEmailVerification
@@ -30,6 +32,7 @@ interface AuthContextType {
   currentUser: User | null;
   userProfile: UserProfile | null;
   login: (email: string, password: string) => Promise<void>;
+  loginWithGoogle: () => Promise<void>;
   signup: (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email' | 'isOnline' | 'lastSeen' | 'emailVerified'>) => Promise<void>;
   logout: () => Promise<void>;
   updateUserLocation: () => Promise<void>;
@@ -47,6 +50,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [currentUser, setCurrentUser] = useState<User | null>(null);
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [loading, setLoading] = useState(true);
+
+  const googleProvider = new GoogleAuthProvider();
 
   const updateUserLocation = async () => {
     if (!userProfile) return;
@@ -81,6 +86,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('Error sending verification email:', error);
         throw error;
       }
+    }
+  };
+
+  const loginWithGoogle = async () => {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const user = result.user;
+      
+      // Check if user profile exists
+      const userDoc = await getDoc(doc(db, 'users', user.uid));
+      if (!userDoc.exists()) {
+        // For Google login, we'll need to collect additional profile data
+        // This will be handled in the AuthFlow component
+        console.log('New Google user, needs profile setup');
+      }
+    } catch (error) {
+      console.error('Error with Google login:', error);
+      throw error;
     }
   };
 
@@ -120,6 +143,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
+      console.log('Auth state changed:', user?.email, user?.emailVerified);
       setCurrentUser(user);
       
       if (user) {
@@ -135,6 +159,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               emailVerified: user.emailVerified
             });
           }
+        } else {
+          // User exists but no profile (e.g., Google login without profile setup)
+          setUserProfile(null);
         }
       } else {
         setUserProfile(null);
@@ -150,11 +177,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
+    const handleVisibilityChange = () => {
+      if (userProfile) {
+        updateOnlineStatus(userProfile.id, !document.hidden);
+      }
+    };
+
     window.addEventListener('beforeunload', handleBeforeUnload);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
 
     return () => {
       unsubscribe();
       window.removeEventListener('beforeunload', handleBeforeUnload);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
   }, [userProfile?.id]);
 
@@ -162,6 +197,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     currentUser,
     userProfile,
     login,
+    loginWithGoogle,
     signup,
     logout,
     updateUserLocation,

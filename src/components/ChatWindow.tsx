@@ -18,6 +18,7 @@ import { Input } from './ui/input';
 import { Badge } from './ui/badge';
 import { Send, Phone, Video, X } from 'lucide-react';
 import { toast } from 'sonner';
+import VideoCall from './VideoCall';
 
 interface Message {
   id: string;
@@ -42,6 +43,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
   const [messages, setMessages] = useState<Message[]>([]);
   const [newMessage, setNewMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [showVideoCall, setShowVideoCall] = useState(false);
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -101,13 +103,33 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
 
   const handleCall = () => {
     toast.success(`Starting voice call with ${otherUser.name}...`);
-    // Implement WebRTC or third-party calling service
+    // For voice call, we can also use Jitsi with audio only
+    const roomId = `${userProfile?.id}-${otherUser.id}-${Date.now()}`;
+    window.open(`https://meet.jit.si/SoulLink-Audio-${roomId}`, '_blank');
   };
 
   const handleVideoCall = () => {
+    setShowVideoCall(true);
     toast.success(`Starting video call with ${otherUser.name}...`);
-    // Implement WebRTC or third-party video calling service
   };
+
+  const handleEndCall = () => {
+    setShowVideoCall(false);
+    toast.success('Call ended');
+  };
+
+  if (showVideoCall) {
+    const roomId = `${userProfile?.id}-${otherUser.id}`;
+    return (
+      <div className="max-w-4xl mx-auto">
+        <VideoCall
+          roomId={roomId}
+          participantName={otherUser.name}
+          onEndCall={handleEndCall}
+        />
+      </div>
+    );
+  }
 
   return (
     <Card className="h-[600px] flex flex-col">
