@@ -13,7 +13,7 @@ const Index = () => {
   const { currentUser, userProfile, sendVerificationEmail } = useAuth();
 
   // Show auth flow if no user is logged in
-  if (!currentUser || !userProfile) {
+  if (!currentUser) {
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
         <div className="container mx-auto px-4 py-8">
@@ -49,12 +49,22 @@ const Index = () => {
                   <Mail className="w-8 h-8 text-yellow-600" />
                 </div>
                 <h2 className="text-xl font-bold text-yellow-800 mb-2">Email Verification Required</h2>
-                <p className="text-yellow-700 mb-4">
+                <p className="text-yellow-700 mb-2">
                   Please verify your email address to access your dashboard.
+                </p>
+                <p className="text-sm text-yellow-600 mb-4">
+                  Check your email inbox and spam folder for the verification link.
                 </p>
                 <div className="space-y-3">
                   <Button
-                    onClick={sendVerificationEmail}
+                    onClick={async () => {
+                      try {
+                        await sendVerificationEmail();
+                        alert('Verification email sent! Please check your inbox and spam folder.');
+                      } catch (error) {
+                        alert('Failed to send verification email. Please try again.');
+                      }
+                    }}
                     className="w-full bg-yellow-600 hover:bg-yellow-700 text-white"
                   >
                     Resend Verification Email
@@ -75,24 +85,51 @@ const Index = () => {
     );
   }
 
-  // Show main dashboard for verified users
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
-      <Navbar />
-      <div className="container mx-auto px-4 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-gray-800 mb-2">
-            Welcome back, {userProfile.name}!
-          </h1>
-          <p className="text-gray-600">
-            {userProfile.role === 'seeker' 
-              ? 'Find support from our caring community of helpers'
-              : 'Make a difference by helping others in their wellness journey'
-            }
-          </p>
+  // Show profile completion for Google users without profile
+  if (!userProfile && currentUser.emailVerified) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
+        <div className="container mx-auto px-4 py-8">
+          <div className="text-center mb-12">
+            <h1 className="text-3xl font-bold text-gray-800 mb-4">Complete Your Profile</h1>
+            <p className="text-gray-600">Please complete your profile to continue using SoulLink</p>
+          </div>
+          <AuthFlow />
         </div>
-        
-        {userProfile.role === 'seeker' ? <SeekerDashboard /> : <HelperDashboard />}
+      </div>
+    );
+  }
+
+  // Show main dashboard for verified users with complete profiles
+  if (userProfile) {
+    return (
+      <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
+        <Navbar />
+        <div className="container mx-auto px-4 py-8">
+          <div className="mb-8">
+            <h1 className="text-3xl font-bold text-gray-800 mb-2">
+              Welcome back, {userProfile.name}!
+            </h1>
+            <p className="text-gray-600">
+              {userProfile.role === 'seeker' 
+                ? 'Find support from our caring community of helpers'
+                : 'Make a difference by helping others in their wellness journey'
+              }
+            </p>
+          </div>
+          
+          {userProfile.role === 'seeker' ? <SeekerDashboard /> : <HelperDashboard />}
+        </div>
+      </div>
+    );
+  }
+
+  // Fallback loading state
+  return (
+    <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 flex items-center justify-center">
+      <div className="text-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-600 mx-auto mb-4"></div>
+        <p className="text-gray-600">Loading...</p>
       </div>
     </div>
   );

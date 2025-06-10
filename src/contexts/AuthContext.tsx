@@ -52,6 +52,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [loading, setLoading] = useState(true);
 
   const googleProvider = new GoogleAuthProvider();
+  googleProvider.addScope('email');
+  googleProvider.addScope('profile');
 
   const updateUserLocation = async () => {
     if (!userProfile) return;
@@ -81,7 +83,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const sendVerificationEmail = async () => {
     if (currentUser && !currentUser.emailVerified) {
       try {
-        await sendEmailVerification(currentUser);
+        await sendEmailVerification(currentUser, {
+          url: window.location.origin,
+          handleCodeInApp: false
+        });
       } catch (error) {
         console.error('Error sending verification email:', error);
         throw error;
@@ -97,9 +102,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Check if user profile exists
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       if (!userDoc.exists()) {
-        // For Google login, we'll need to collect additional profile data
-        // This will be handled in the AuthFlow component
-        console.log('New Google user, needs profile setup');
+        // For new Google users, we need to create a basic profile
+        // The user will need to complete their profile later
+        console.log('New Google user, will need profile setup');
+      } else {
+        // Update online status for existing users
+        await updateOnlineStatus(user.uid, true);
       }
     } catch (error) {
       console.error('Error with Google login:', error);
@@ -111,7 +119,10 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     const { user } = await createUserWithEmailAndPassword(auth, email, password);
     
     // Send email verification
-    await sendEmailVerification(user);
+    await sendEmailVerification(user, {
+      url: window.location.origin,
+      handleCodeInApp: false
+    });
     
     const profile: UserProfile = {
       id: user.uid,
@@ -147,20 +158,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setCurrentUser(user);
       
       if (user) {
-        const userDoc = await getDoc(doc(db, 'users', user.uid));
-        if (userDoc.exists()) {
-          const profile = { ...userDoc.data(), emailVerified: user.emailVerified } as UserProfile;
-          setUserProfile(profile);
-          await updateOnlineStatus(user.uid, true);
-          
-          // Update email verification status in Firestore
-          if (user.emailVerified !== profile.emailVerified) {
-            await updateDoc(doc(db, 'users', user.uid), {
-              emailVerified: user.emailVerified
-            });
+        try {
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const profile = { ...userDoc.data(), emailVerified: user.emailVerified } as UserProfile;
+            setUserProfile(profile);
+            await updateOnlineStatus(user.uid, true);
+            
+            // Update email verification status in Firestore
+            if (user.emailVerified !== profile.emailVerified) {
+              await updateDoc(doc(db, 'users', user.uid), {
+                emailVerified: user.emailVerified
+              });
+            }
+          } else {
+            // User exists but no profile (e.g., Google login without profile setup)
+            setUserProfile(null);
           }
-        } else {
-          // User exists but no profile (e.g., Google login without profile setup)
+        } catch (error) {
+          console.error('Error fetching user profile:', error);
           setUserProfile(null);
         }
       } else {
