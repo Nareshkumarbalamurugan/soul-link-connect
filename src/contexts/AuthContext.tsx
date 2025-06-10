@@ -6,7 +6,8 @@ import {
   createUserWithEmailAndPassword,
   signInWithEmailAndPassword,
   signOut,
-  onAuthStateChanged
+  onAuthStateChanged,
+  sendEmailVerification
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { getCurrentLocation, Location } from '../utils/geolocation';
@@ -22,15 +23,17 @@ interface UserProfile {
   isAvailable?: boolean;
   isOnline?: boolean;
   lastSeen?: Date;
+  emailVerified?: boolean;
 }
 
 interface AuthContextType {
   currentUser: User | null;
   userProfile: UserProfile | null;
   login: (email: string, password: string) => Promise<void>;
-  signup: (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email' | 'isOnline' | 'lastSeen'>) => Promise<void>;
+  signup: (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email' | 'isOnline' | 'lastSeen' | 'emailVerified'>) => Promise<void>;
   logout: () => Promise<void>;
   updateUserLocation: () => Promise<void>;
+  sendVerificationEmail: () => Promise<void>;
   loading: boolean;
 }
 
@@ -70,14 +73,29 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signup = async (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email' | 'isOnline' | 'lastSeen'>) => {
+  const sendVerificationEmail = async () => {
+    if (currentUser && !currentUser.emailVerified) {
+      try {
+        await sendEmailVerification(currentUser);
+      } catch (error) {
+        console.error('Error sending verification email:', error);
+        throw error;
+      }
+    }
+  };
+
+  const signup = async (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email' | 'isOnline' | 'lastSeen' | 'emailVerified'>) => {
     const { user } = await createUserWithEmailAndPassword(auth, email, password);
+    
+    // Send email verification
+    await sendEmailVerification(user);
     
     const profile: UserProfile = {
       id: user.uid,
       email: user.email!,
       isOnline: true,
       lastSeen: new Date(),
+      emailVerified: user.emailVerified,
       ...profileData
     };
     
@@ -107,9 +125,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (user) {
         const userDoc = await getDoc(doc(db, 'users', user.uid));
         if (userDoc.exists()) {
-          const profile = userDoc.data() as UserProfile;
+          const profile = { ...userDoc.data(), emailVerified: user.emailVerified } as UserProfile;
           setUserProfile(profile);
           await updateOnlineStatus(user.uid, true);
+          
+          // Update email verification status in Firestore
+          if (user.emailVerified !== profile.emailVerified) {
+            await updateDoc(doc(db, 'users', user.uid), {
+              emailVerified: user.emailVerified
+            });
+          }
         }
       } else {
         setUserProfile(null);
@@ -140,6 +165,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     signup,
     logout,
     updateUserLocation,
+    sendVerificationEmail,
     loading
   };
 

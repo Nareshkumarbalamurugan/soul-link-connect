@@ -48,6 +48,27 @@ export const calculateDistance = (loc1: Location, loc2: Location): number => {
   return distance;
 };
 
-export const isWithinRange = (loc1: Location, loc2: Location, maxDistance: number = 10): boolean => {
+export const isWithinRange = (loc1: Location, loc2: Location, maxDistance: number = 50): boolean => {
   return calculateDistance(loc1, loc2) <= maxDistance;
+};
+
+// Sort helpers by distance (nearby first)
+export const sortHelpersByDistance = (helpers: any[], userLocation: Location | null): any[] => {
+  if (!userLocation) return helpers;
+  
+  return helpers
+    .map(helper => {
+      if (typeof helper.location === 'object' && helper.location.latitude) {
+        const distance = calculateDistance(userLocation, helper.location as Location);
+        return { ...helper, distance: Math.round(distance * 10) / 10 };
+      }
+      return { ...helper, distance: null };
+    })
+    .sort((a, b) => {
+      // Prioritize helpers with location data
+      if (a.distance === null && b.distance !== null) return 1;
+      if (a.distance !== null && b.distance === null) return -1;
+      if (a.distance === null && b.distance === null) return 0;
+      return (a.distance || 0) - (b.distance || 0);
+    });
 };

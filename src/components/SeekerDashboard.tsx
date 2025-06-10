@@ -8,9 +8,9 @@ import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
 import { useAuth } from '../contexts/AuthContext';
-import { Phone, MessageCircle, Filter, MapPin } from 'lucide-react';
+import { Phone, MessageCircle, Filter, MapPin, Star } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentLocation, isWithinRange, Location } from '../utils/geolocation';
+import { getCurrentLocation, sortHelpersByDistance, Location } from '../utils/geolocation';
 
 interface Helper {
   id: string;
@@ -19,7 +19,7 @@ interface Helper {
   languages: string[];
   location: string | Location;
   isAvailable: boolean;
-  distance?: number;
+  distance?: number | null;
 }
 
 const SeekerDashboard: React.FC = () => {
@@ -50,7 +50,7 @@ const SeekerDashboard: React.FC = () => {
       const location = await getCurrentLocation();
       setUserLocation(location);
       setLocationEnabled(true);
-      toast.success('Location enabled! Showing nearby helpers');
+      toast.success('Location enabled! Showing nearby helpers first');
     } catch (error) {
       console.error('Error getting location:', error);
       toast.error('Location access denied. Showing all helpers');
@@ -72,19 +72,9 @@ const SeekerDashboard: React.FC = () => {
         ...doc.data()
       } as Helper));
 
-      // Calculate distances if location is available
-      if (userLocation && locationEnabled) {
-        helpersData = helpersData
-          .map(helper => {
-            if (typeof helper.location === 'object' && helper.location.latitude) {
-              const distance = isWithinRange(userLocation, helper.location as Location, 10) ? 
-                Math.round(getCurrentDistance(userLocation, helper.location as Location) * 10) / 10 : null;
-              return { ...helper, distance };
-            }
-            return helper;
-          })
-          .filter(helper => helper.distance !== null)
-          .sort((a, b) => (a.distance || 0) - (b.distance || 0));
+      // Sort helpers by distance (nearby first) if location is available
+      if (userLocation) {
+        helpersData = sortHelpersByDistance(helpersData, userLocation);
       }
       
       setHelpers(helpersData);
@@ -94,21 +84,6 @@ const SeekerDashboard: React.FC = () => {
     } finally {
       setLoading(false);
     }
-  };
-
-  const getCurrentDistance = (loc1: Location, loc2: Location): number => {
-    const R = 6371;
-    const dLat = (loc2.latitude - loc1.latitude) * (Math.PI / 180);
-    const dLon = (loc2.longitude - loc1.longitude) * (Math.PI / 180);
-    
-    const a =
-      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-      Math.cos(loc1.latitude * (Math.PI / 180)) *
-      Math.cos(loc2.latitude * (Math.PI / 180)) *
-      Math.sin(dLon / 2) * Math.sin(dLon / 2);
-    
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-    return R * c;
   };
 
   const filterHelpers = () => {
@@ -205,7 +180,7 @@ const SeekerDashboard: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <MapPin className="w-5 h-5 text-blue-600" />
-                <span className="text-blue-800">Enable location to find nearby helpers</span>
+                <span className="text-blue-800">Enable location to prioritize nearby helpers</span>
               </div>
               <Button onClick={requestLocation} variant="outline" size="sm">
                 Enable Location
@@ -219,8 +194,14 @@ const SeekerDashboard: React.FC = () => {
       <Card>
         <CardHeader>
           <div className="flex justify-between items-center">
-            <CardTitle className="text-2xl font-bold text-gray-800">
-              {locationEnabled ? 'Nearby Helpers' : 'Available Helpers'}
+            <CardTitle className="text-2xl font-bold text-gray-800 flex items-center space-x-2">
+              <span>Available Helpers</span>
+              {locationEnabled && (
+                <div className="flex items-center space-x-1 text-sm font-normal text-green-600">
+                  <Star className="w-4 h-4" />
+                  <span>Nearby prioritized</span>
+                </div>
+              )}
             </CardTitle>
             <div className="flex items-center space-x-2">
               <Filter className="w-5 h-5 text-gray-500" />
@@ -269,17 +250,26 @@ const SeekerDashboard: React.FC = () => {
           ) : (
             <div className="grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {filteredHelpers.map((helper) => (
-                <ProfileCard
-                  key={helper.id}
-                  name={helper.name}
-                  gender={helper.gender}
-                  languages={helper.languages}
-                  location={typeof helper.location === 'string' ? helper.location : 
-                    helper.distance ? `${helper.distance} km away` : 'Location unknown'}
-                  isAvailable={helper.isAvailable}
-                  onChat={() => handleChat(helper.id, helper.name)}
-                  onCall={() => handleCall(helper.id, helper.name)}
-                />
+                <div key={helper.id} className="relative">
+                  {helper.distance !== null && helper.distance !== undefined && helper.distance <= 10 && (
+                    <div className="absolute -top-2 -right-2 z-10">
+                      <div className="bg-green-500 text-white text-xs px-2 py-1 rounded-full flex items-center space-x-1">
+                        <Star className="w-3 h-3" />
+                        <span>Nearby</span>
+                      </div>
+                    </div>
+                  )}
+                  <ProfileCard
+                    name={helper.name}
+                    gender={helper.gender}
+                    languages={helper.languages}
+                    location={typeof helper.location === 'string' ? helper.location : 
+                      helper.distance !== null ? `${helper.distance} km away` : 'Location unknown'}
+                    isAvailable={helper.isAvailable}
+                    onChat={() => handleChat(helper.id, helper.name)}
+                    onCall={() => handleCall(helper.id, helper.name)}
+                  />
+                </div>
               ))}
             </div>
           )}
