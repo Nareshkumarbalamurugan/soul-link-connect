@@ -131,7 +131,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     } catch (error: any) {
       console.error('Error with Google login:', error);
       if (error.code === 'auth/unauthorized-domain') {
-        throw new Error('Google login is not authorized for this domain. Please use email login or contact support.');
+        throw new Error('Google login is not authorized for this domain. Please add your domain to Firebase Auth settings or use email login.');
       }
       throw error;
     }
@@ -163,7 +163,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       initializeRecaptcha();
       const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
       
-      // Store profile data temporarily (you might want to use localStorage or state)
+      // Store profile data temporarily
       localStorage.setItem('pendingProfile', JSON.stringify({ ...profileData, phone: phoneNumber }));
       
       return confirmationResult.verificationId;
@@ -203,7 +203,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       console.log('Attempting login with email:', email);
       const result = await signInWithEmailAndPassword(auth, email, password);
       console.log('Login successful:', result.user.email);
-      // The auth state change will handle the rest
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -235,7 +234,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               phone: user.phoneNumber,
               isOnline: true,
               lastSeen: new Date(),
-              emailVerified: true, // Phone verified users are considered verified
+              emailVerified: true,
               ...profileData
             };
             
@@ -295,7 +294,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   return (
     <AuthContext.Provider value={value}>
-      {!loading && children}
+      {children}
+      <div id="recaptcha-container"></div>
     </AuthContext.Provider>
   );
 };
