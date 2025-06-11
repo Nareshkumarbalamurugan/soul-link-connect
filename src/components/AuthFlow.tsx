@@ -9,19 +9,24 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Checkbox } from './ui/checkbox';
 import RoleSelector from './RoleSelector';
 import { toast } from 'sonner';
-import { Mail, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import { Mail, AlertCircle, Eye, EyeOff, Phone } from 'lucide-react';
 
-type FlowStep = 'role-selection' | 'registration' | 'login';
+type FlowStep = 'role-selection' | 'registration' | 'login' | 'phone-verification';
+type AuthMethod = 'email' | 'phone';
 
 const AuthFlow: React.FC = () => {
-  const { login, signup, loginWithGoogle, sendVerificationEmail } = useAuth();
+  const { login, signup, loginWithGoogle, loginWithPhone, verifyPhone, signupWithPhone, sendVerificationEmail } = useAuth();
   const [step, setStep] = useState<FlowStep>('role-selection');
   const [selectedRole, setSelectedRole] = useState<'seeker' | 'helper' | null>(null);
+  const [authMethod, setAuthMethod] = useState<AuthMethod>('email');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
+  const [verificationId, setVerificationId] = useState('');
+  const [verificationCode, setVerificationCode] = useState('');
   const [formData, setFormData] = useState({
     email: '',
     password: '',
+    phone: '',
     name: '',
     gender: '',
     languages: [] as string[],
@@ -40,7 +45,7 @@ const AuthFlow: React.FC = () => {
       toast.success('Successfully logged in with Google!');
     } catch (error: any) {
       console.error('Google login error:', error);
-      toast.error(error.message || 'Failed to login with Google');
+      toast.error(error.message || 'Failed to login with Google. Try email login instead.');
     } finally {
       setLoading(false);
     }
@@ -57,16 +62,29 @@ const AuthFlow: React.FC = () => {
     
     setLoading(true);
     try {
-      await signup(formData.email, formData.password, {
-        name: formData.name,
-        gender: formData.gender as 'male' | 'female' | 'other',
-        languages: formData.languages,
-        location: formData.location,
-        role: selectedRole,
-        isAvailable: selectedRole === 'helper'
-      });
-      
-      toast.success('Account created! Please check your email for verification (including spam folder).');
+      if (authMethod === 'email') {
+        await signup(formData.email, formData.password, {
+          name: formData.name,
+          gender: formData.gender as 'male' | 'female' | 'other',
+          languages: formData.languages,
+          location: formData.location,
+          role: selectedRole,
+          isAvailable: selectedRole === 'helper'
+        });
+        toast.success('Account created! Please check your email for verification (including spam folder).');
+      } else {
+        const verificationId = await signupWithPhone(formData.phone, {
+          name: formData.name,
+          gender: formData.gender as 'male' | 'female' | 'other',
+          languages: formData.languages,
+          location: formData.location,
+          role: selectedRole,
+          isAvailable: selectedRole === 'helper'
+        });
+        setVerificationId(verificationId);
+        setStep('phone-verification');
+        toast.success('Verification code sent to your phone!');
+      }
     } catch (error: any) {
       toast.error(error.message || 'Registration failed');
     }
@@ -78,10 +96,30 @@ const AuthFlow: React.FC = () => {
     setLoading(true);
     
     try {
-      await login(formData.email, formData.password);
-      toast.success('Welcome back!');
+      if (authMethod === 'email') {
+        await login(formData.email, formData.password);
+        toast.success('Welcome back!');
+      } else {
+        const verificationId = await loginWithPhone(formData.phone);
+        setVerificationId(verificationId);
+        setStep('phone-verification');
+        toast.success('Verification code sent to your phone!');
+      }
     } catch (error: any) {
       toast.error(error.message || 'Login failed');
+    }
+    setLoading(false);
+  };
+
+  const handlePhoneVerification = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    try {
+      await verifyPhone(verificationId, verificationCode);
+      toast.success('Phone verified successfully!');
+    } catch (error: any) {
+      toast.error(error.message || 'Verification failed');
     }
     setLoading(false);
   };
@@ -99,6 +137,45 @@ const AuthFlow: React.FC = () => {
       }));
     }
   };
+
+  // Phone verification step
+  if (step === 'phone-verification') {
+    return (
+      <Card className="w-full max-w-md mx-auto">
+        <CardHeader>
+          <CardTitle className="text-center text-2xl font-bold text-gray-800">
+            Verify Phone Number
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handlePhoneVerification} className="space-y-4">
+            <div>
+              <Label htmlFor="verification-code">Verification Code</Label>
+              <Input
+                id="verification-code"
+                type="text"
+                value={verificationCode}
+                onChange={(e) => setVerificationCode(e.target.value)}
+                required
+                placeholder="Enter 6-digit code"
+                maxLength={6}
+              />
+            </div>
+            
+            <Button 
+              type="submit" 
+              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+              disabled={loading}
+            >
+              {loading ? 'Verifying...' : 'Verify Code'}
+            </Button>
+          </form>
+          
+          <div id="recaptcha-container"></div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   // Role selection step
   if (step === 'role-selection') {
@@ -151,8 +228,30 @@ const AuthFlow: React.FC = () => {
               <span className="w-full border-t" />
             </div>
             <div className="relative flex justify-center text-xs uppercase">
-              <span className="bg-white px-2 text-gray-500">Or register with email</span>
+              <span className="bg-white px-2 text-gray-500">Or register with</span>
             </div>
+          </div>
+
+          {/* Auth Method Selection */}
+          <div className="flex space-x-2 mb-4">
+            <Button
+              type="button"
+              variant={authMethod === 'email' ? 'default' : 'outline'}
+              onClick={() => setAuthMethod('email')}
+              className="flex-1"
+            >
+              <Mail className="w-4 h-4 mr-2" />
+              Email
+            </Button>
+            <Button
+              type="button"
+              variant={authMethod === 'phone' ? 'default' : 'outline'}
+              onClick={() => setAuthMethod('phone')}
+              className="flex-1"
+            >
+              <Phone className="w-4 h-4 mr-2" />
+              Phone
+            </Button>
           </div>
 
           <form onSubmit={handleRegistration} className="space-y-4">
@@ -209,39 +308,55 @@ const AuthFlow: React.FC = () => {
               />
             </div>
             
-            <div>
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={formData.email}
-                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-                required
-                placeholder="Enter your email"
-              />
-            </div>
-            
-            <div>
-              <Label htmlFor="password">Password</Label>
-              <div className="relative">
+            {authMethod === 'email' ? (
+              <>
+                <div>
+                  <Label htmlFor="email">Email</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    value={formData.email}
+                    onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                    required
+                    placeholder="Enter your email"
+                  />
+                </div>
+                
+                <div>
+                  <Label htmlFor="password">Password</Label>
+                  <div className="relative">
+                    <Input
+                      id="password"
+                      type={showPassword ? "text" : "password"}
+                      value={formData.password}
+                      onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                      required
+                      placeholder="Enter your password"
+                      className="pr-10"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => setShowPassword(!showPassword)}
+                      className="absolute right-3 top-3 h-4 w-4 text-gray-400 hover:text-gray-600"
+                    >
+                      {showPassword ? <EyeOff /> : <Eye />}
+                    </button>
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div>
+                <Label htmlFor="phone">Phone Number</Label>
                 <Input
-                  id="password"
-                  type={showPassword ? "text" : "password"}
-                  value={formData.password}
-                  onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                  id="phone"
+                  type="tel"
+                  value={formData.phone}
+                  onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                   required
-                  placeholder="Enter your password"
-                  className="pr-10"
+                  placeholder="+1234567890"
                 />
-                <button
-                  type="button"
-                  onClick={() => setShowPassword(!showPassword)}
-                  className="absolute right-3 top-3 h-4 w-4 text-gray-400 hover:text-gray-600"
-                >
-                  {showPassword ? <EyeOff /> : <Eye />}
-                </button>
               </div>
-            </div>
+            )}
             
             <Button 
               type="submit" 
@@ -268,6 +383,8 @@ const AuthFlow: React.FC = () => {
               Change role selection
             </Button>
           </div>
+
+          <div id="recaptcha-container"></div>
         </CardContent>
       </Card>
     );
@@ -303,44 +420,82 @@ const AuthFlow: React.FC = () => {
             <span className="w-full border-t" />
           </div>
           <div className="relative flex justify-center text-xs uppercase">
-            <span className="bg-white px-2 text-gray-500">Or sign in with email</span>
+            <span className="bg-white px-2 text-gray-500">Or sign in with</span>
           </div>
         </div>
 
+        {/* Auth Method Selection */}
+        <div className="flex space-x-2 mb-4">
+          <Button
+            type="button"
+            variant={authMethod === 'email' ? 'default' : 'outline'}
+            onClick={() => setAuthMethod('email')}
+            className="flex-1"
+          >
+            <Mail className="w-4 h-4 mr-2" />
+            Email
+          </Button>
+          <Button
+            type="button"
+            variant={authMethod === 'phone' ? 'default' : 'outline'}
+            onClick={() => setAuthMethod('phone')}
+            className="flex-1"
+          >
+            <Phone className="w-4 h-4 mr-2" />
+            Phone
+          </Button>
+        </div>
+
         <form onSubmit={handleLogin} className="space-y-4">
-          <div>
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              value={formData.email}
-              onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
-              required
-              placeholder="Enter your email"
-            />
-          </div>
-          
-          <div>
-            <Label htmlFor="password">Password</Label>
-            <div className="relative">
+          {authMethod === 'email' ? (
+            <>
+              <div>
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={formData.email}
+                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                  required
+                  placeholder="Enter your email"
+                />
+              </div>
+              
+              <div>
+                <Label htmlFor="password">Password</Label>
+                <div className="relative">
+                  <Input
+                    id="password"
+                    type={showPassword ? "text" : "password"}
+                    value={formData.password}
+                    onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                    required
+                    placeholder="Enter your password"
+                    className="pr-10"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowPassword(!showPassword)}
+                    className="absolute right-3 top-3 h-4 w-4 text-gray-400 hover:text-gray-600"
+                  >
+                    {showPassword ? <EyeOff /> : <Eye />}
+                  </button>
+                </div>
+              </div>
+            </>
+          ) : (
+            <div>
+              <Label htmlFor="phone">Phone Number</Label>
               <Input
-                id="password"
-                type={showPassword ? "text" : "password"}
-                value={formData.password}
-                onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                id="phone"
+                type="tel"
+                value={formData.phone}
+                onChange={(e) => setFormData(prev => ({ ...prev, phone: e.target.value }))}
                 required
-                placeholder="Enter your password"
-                className="pr-10"
+                placeholder="+1234567890"
               />
-              <button
-                type="button"
-                onClick={() => setShowPassword(!showPassword)}
-                className="absolute right-3 top-3 h-4 w-4 text-gray-400 hover:text-gray-600"
-              >
-                {showPassword ? <EyeOff /> : <Eye />}
-              </button>
             </div>
-          </div>
+          )}
           
           <Button 
             type="submit" 
@@ -360,6 +515,8 @@ const AuthFlow: React.FC = () => {
             Don't have an account? Sign up
           </Button>
         </div>
+
+        <div id="recaptcha-container"></div>
       </CardContent>
     </Card>
   );

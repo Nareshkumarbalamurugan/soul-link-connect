@@ -16,4 +16,10 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const db = getFirestore(app);
+
+// Add current domain to authorized domains for development
+if (window.location.hostname !== 'localhost' && window.location.hostname !== 'soullink-96d4b.firebaseapp.com') {
+  console.warn('Current domain may not be authorized for Firebase Auth. Please add it to your Firebase console.');
+}
+
 export default app;

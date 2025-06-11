@@ -9,7 +9,11 @@ import {
   GoogleAuthProvider,
   signOut,
   onAuthStateChanged,
-  sendEmailVerification
+  sendEmailVerification,
+  RecaptchaVerifier,
+  signInWithPhoneNumber,
+  PhoneAuthProvider,
+  signInWithCredential
 } from 'firebase/auth';
 import { doc, setDoc, getDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { getCurrentLocation, Location } from '../utils/geolocation';
@@ -18,6 +22,7 @@ interface UserProfile {
   id: string;
   name: string;
   email: string;
+  phone?: string;
   gender: 'male' | 'female' | 'other';
   languages: string[];
   location: string | Location;
@@ -33,7 +38,10 @@ interface AuthContextType {
   userProfile: UserProfile | null;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
+  loginWithPhone: (phoneNumber: string) => Promise<string>;
+  verifyPhone: (verificationId: string, code: string) => Promise<void>;
   signup: (email: string, password: string, profileData: Omit<UserProfile, 'id' | 'email' | 'isOnline' | 'lastSeen' | 'emailVerified'>) => Promise<void>;
+  signupWithPhone: (phoneNumber: string, profileData: Omit<UserProfile, 'id' | 'email' | 'phone' | 'isOnline' | 'lastSeen' | 'emailVerified'>) => Promise<string>;
   logout: () => Promise<void>;
   updateUserLocation: () => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
@@ -54,6 +62,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const googleProvider = new GoogleAuthProvider();
   googleProvider.addScope('email');
   googleProvider.addScope('profile');
+
+  // Initialize reCAPTCHA for phone auth
+  const initializeRecaptcha = () => {
+    if (!window.recaptchaVerifier) {
+      window.recaptchaVerifier = new RecaptchaVerifier(auth, 'recaptcha-container', {
+        size: 'invisible',
+        callback: () => {
+          console.log('reCAPTCHA solved');
+        }
+      });
+    }
+  };
 
   const updateUserLocation = async () => {
     if (!userProfile) return;
@@ -96,21 +116,59 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const loginWithGoogle = async () => {
     try {
+      console.log('Starting Google login...');
       const result = await signInWithPopup(auth, googleProvider);
       const user = result.user;
+      console.log('Google login successful:', user.email);
       
       // Check if user profile exists
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       if (!userDoc.exists()) {
-        // For new Google users, we need to create a basic profile
-        // The user will need to complete their profile later
         console.log('New Google user, will need profile setup');
       } else {
-        // Update online status for existing users
         await updateOnlineStatus(user.uid, true);
       }
-    } catch (error) {
+    } catch (error: any) {
       console.error('Error with Google login:', error);
+      if (error.code === 'auth/unauthorized-domain') {
+        throw new Error('Google login is not authorized for this domain. Please use email login or contact support.');
+      }
+      throw error;
+    }
+  };
+
+  const loginWithPhone = async (phoneNumber: string): Promise<string> => {
+    try {
+      initializeRecaptcha();
+      const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
+      return confirmationResult.verificationId;
+    } catch (error) {
+      console.error('Error with phone login:', error);
+      throw error;
+    }
+  };
+
+  const verifyPhone = async (verificationId: string, code: string) => {
+    try {
+      const credential = PhoneAuthProvider.credential(verificationId, code);
+      await signInWithCredential(auth, credential);
+    } catch (error) {
+      console.error('Error verifying phone:', error);
+      throw error;
+    }
+  };
+
+  const signupWithPhone = async (phoneNumber: string, profileData: Omit<UserProfile, 'id' | 'email' | 'phone' | 'isOnline' | 'lastSeen' | 'emailVerified'>): Promise<string> => {
+    try {
+      initializeRecaptcha();
+      const confirmationResult = await signInWithPhoneNumber(auth, phoneNumber, window.recaptchaVerifier);
+      
+      // Store profile data temporarily (you might want to use localStorage or state)
+      localStorage.setItem('pendingProfile', JSON.stringify({ ...profileData, phone: phoneNumber }));
+      
+      return confirmationResult.verificationId;
+    } catch (error) {
+      console.error('Error with phone signup:', error);
       throw error;
     }
   };
@@ -141,7 +199,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const login = async (email: string, password: string) => {
-    await signInWithEmailAndPassword(auth, email, password);
+    try {
+      console.log('Attempting login with email:', email);
+      const result = await signInWithEmailAndPassword(auth, email, password);
+      console.log('Login successful:', result.user.email);
+      // The auth state change will handle the rest
+    } catch (error) {
+      console.error('Login error:', error);
+      throw error;
+    }
   };
 
   const logout = async () => {
@@ -159,21 +225,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (user) {
         try {
-          const userDoc = await getDoc(doc(db, 'users', user.uid));
-          if (userDoc.exists()) {
-            const profile = { ...userDoc.data(), emailVerified: user.emailVerified } as UserProfile;
-            setUserProfile(profile);
-            await updateOnlineStatus(user.uid, true);
+          // Check for pending phone profile
+          const pendingProfile = localStorage.getItem('pendingProfile');
+          if (pendingProfile && user.phoneNumber) {
+            const profileData = JSON.parse(pendingProfile);
+            const profile: UserProfile = {
+              id: user.uid,
+              email: user.email || '',
+              phone: user.phoneNumber,
+              isOnline: true,
+              lastSeen: new Date(),
+              emailVerified: true, // Phone verified users are considered verified
+              ...profileData
+            };
             
-            // Update email verification status in Firestore
-            if (user.emailVerified !== profile.emailVerified) {
-              await updateDoc(doc(db, 'users', user.uid), {
-                emailVerified: user.emailVerified
-              });
-            }
+            await setDoc(doc(db, 'users', user.uid), {
+              ...profile,
+              lastSeen: serverTimestamp()
+            });
+            setUserProfile(profile);
+            localStorage.removeItem('pendingProfile');
           } else {
-            // User exists but no profile (e.g., Google login without profile setup)
-            setUserProfile(null);
+            const userDoc = await getDoc(doc(db, 'users', user.uid));
+            if (userDoc.exists()) {
+              const profile = { ...userDoc.data(), emailVerified: user.emailVerified } as UserProfile;
+              setUserProfile(profile);
+              await updateOnlineStatus(user.uid, true);
+              
+              // Update email verification status in Firestore
+              if (user.emailVerified !== profile.emailVerified) {
+                await updateDoc(doc(db, 'users', user.uid), {
+                  emailVerified: user.emailVerified
+                });
+              }
+            } else {
+              setUserProfile(null);
+            }
           }
         } catch (error) {
           console.error('Error fetching user profile:', error);
@@ -186,35 +273,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setLoading(false);
     });
 
-    // Update online status when tab is about to close
-    const handleBeforeUnload = () => {
-      if (userProfile) {
-        updateOnlineStatus(userProfile.id, false);
-      }
-    };
-
-    const handleVisibilityChange = () => {
-      if (userProfile) {
-        updateOnlineStatus(userProfile.id, !document.hidden);
-      }
-    };
-
-    window.addEventListener('beforeunload', handleBeforeUnload);
-    document.addEventListener('visibilitychange', handleVisibilityChange);
-
     return () => {
       unsubscribe();
-      window.removeEventListener('beforeunload', handleBeforeUnload);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
     };
-  }, [userProfile?.id]);
+  }, []);
 
   const value = {
     currentUser,
     userProfile,
     login,
     loginWithGoogle,
+    loginWithPhone,
+    verifyPhone,
     signup,
+    signupWithPhone,
     logout,
     updateUserLocation,
     sendVerificationEmail,
