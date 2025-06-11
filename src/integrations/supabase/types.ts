@@ -9,7 +9,146 @@ export type Json =
 export type Database = {
   public: {
     Tables: {
-      [_ in never]: never
+      chats: {
+        Row: {
+          created_at: string | null
+          id: string
+          last_message: string | null
+          last_message_time: string | null
+          participant_names: string[]
+          participants: string[]
+        }
+        Insert: {
+          created_at?: string | null
+          id?: string
+          last_message?: string | null
+          last_message_time?: string | null
+          participant_names: string[]
+          participants: string[]
+        }
+        Update: {
+          created_at?: string | null
+          id?: string
+          last_message?: string | null
+          last_message_time?: string | null
+          participant_names?: string[]
+          participants?: string[]
+        }
+        Relationships: []
+      }
+      messages: {
+        Row: {
+          chat_id: string | null
+          created_at: string | null
+          id: string
+          sender_id: string | null
+          sender_name: string
+          text: string
+        }
+        Insert: {
+          chat_id?: string | null
+          created_at?: string | null
+          id?: string
+          sender_id?: string | null
+          sender_name: string
+          text: string
+        }
+        Update: {
+          chat_id?: string | null
+          created_at?: string | null
+          id?: string
+          sender_id?: string | null
+          sender_name?: string
+          text?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "messages_chat_id_fkey"
+            columns: ["chat_id"]
+            isOneToOne: false
+            referencedRelation: "chats"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
+      profiles: {
+        Row: {
+          created_at: string | null
+          email: string
+          gender: string | null
+          id: string
+          is_available: boolean | null
+          is_online: boolean | null
+          languages: string[]
+          last_seen: string | null
+          location: string | null
+          name: string
+          phone: string | null
+          role: string
+          updated_at: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          email: string
+          gender?: string | null
+          id: string
+          is_available?: boolean | null
+          is_online?: boolean | null
+          languages?: string[]
+          last_seen?: string | null
+          location?: string | null
+          name: string
+          phone?: string | null
+          role: string
+          updated_at?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          email?: string
+          gender?: string | null
+          id?: string
+          is_available?: boolean | null
+          is_online?: boolean | null
+          languages?: string[]
+          last_seen?: string | null
+          location?: string | null
+          name?: string
+          phone?: string | null
+          role?: string
+          updated_at?: string | null
+        }
+        Relationships: []
+      }
+      support_requests: {
+        Row: {
+          created_at: string | null
+          helper_id: string | null
+          id: string
+          message: string
+          seeker_id: string | null
+          seeker_name: string
+          status: string | null
+        }
+        Insert: {
+          created_at?: string | null
+          helper_id?: string | null
+          id?: string
+          message: string
+          seeker_id?: string | null
+          seeker_name: string
+          status?: string | null
+        }
+        Update: {
+          created_at?: string | null
+          helper_id?: string | null
+          id?: string
+          message?: string
+          seeker_id?: string | null
+          seeker_name?: string
+          status?: string | null
+        }
+        Relationships: []
+      }
     }
     Views: {
       [_ in never]: never

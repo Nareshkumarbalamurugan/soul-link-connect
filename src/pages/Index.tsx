@@ -1,6 +1,6 @@
 
 import React from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/SupabaseAuthContext';
 import AuthFlow from '../components/AuthFlow';
 import SeekerDashboard from '../components/SeekerDashboard';
 import HelperDashboard from '../components/HelperDashboard';
@@ -103,7 +103,7 @@ const Index = () => {
   }
 
   // Show email verification notice if email is not verified (only for email users)
-  if (currentUser.email && !currentUser.emailVerified) {
+  if (currentUser.email && !currentUser.email_confirmed_at) {
     console.log('User email not verified - showing verification prompt');
     return <EmailVerificationPrompt sendVerificationEmail={sendVerificationEmail} />;
   }

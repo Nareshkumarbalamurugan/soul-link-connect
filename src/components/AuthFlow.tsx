@@ -1,6 +1,6 @@
 
 import React, { useState } from 'react';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/SupabaseAuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -21,7 +21,7 @@ const AuthFlow: React.FC = () => {
   const [authMethod, setAuthMethod] = useState<AuthMethod>('email');
   const [loading, setLoading] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
-  const [verificationId, setVerificationId] = useState('');
+  const [otpSent, setOtpSent] = useState(false);
   const [verificationCode, setVerificationCode] = useState('');
   const [formData, setFormData] = useState({
     email: '',
@@ -65,23 +65,29 @@ const AuthFlow: React.FC = () => {
       if (authMethod === 'email') {
         await signup(formData.email, formData.password, {
           name: formData.name,
+          phone: null,
           gender: formData.gender as 'male' | 'female' | 'other',
           languages: formData.languages,
           location: formData.location,
           role: selectedRole,
-          isAvailable: selectedRole === 'helper'
+          is_available: selectedRole === 'helper',
+          is_online: false,
+          last_seen: new Date().toISOString()
         });
         toast.success('Account created! Please check your email for verification (including spam folder).');
       } else {
-        const verificationId = await signupWithPhone(formData.phone, {
+        await signupWithPhone(formData.phone, {
           name: formData.name,
+          email: '',
           gender: formData.gender as 'male' | 'female' | 'other',
           languages: formData.languages,
           location: formData.location,
           role: selectedRole,
-          isAvailable: selectedRole === 'helper'
+          is_available: selectedRole === 'helper',
+          is_online: false,
+          last_seen: new Date().toISOString()
         });
-        setVerificationId(verificationId);
+        setOtpSent(true);
         setStep('phone-verification');
         toast.success('Verification code sent to your phone!');
       }
@@ -100,8 +106,8 @@ const AuthFlow: React.FC = () => {
         await login(formData.email, formData.password);
         toast.success('Welcome back!');
       } else {
-        const verificationId = await loginWithPhone(formData.phone);
-        setVerificationId(verificationId);
+        await loginWithPhone(formData.phone);
+        setOtpSent(true);
         setStep('phone-verification');
         toast.success('Verification code sent to your phone!');
       }
@@ -116,7 +122,7 @@ const AuthFlow: React.FC = () => {
     setLoading(true);
     
     try {
-      await verifyPhone(verificationId, verificationCode);
+      await verifyPhone(verificationCode);
       toast.success('Phone verified successfully!');
     } catch (error: any) {
       toast.error(error.message || 'Verification failed');
@@ -170,8 +176,6 @@ const AuthFlow: React.FC = () => {
               {loading ? 'Verifying...' : 'Verify Code'}
             </Button>
           </form>
-          
-          <div id="recaptcha-container"></div>
         </CardContent>
       </Card>
     );
@@ -383,8 +387,6 @@ const AuthFlow: React.FC = () => {
               Change role selection
             </Button>
           </div>
-
-          <div id="recaptcha-container"></div>
         </CardContent>
       </Card>
     );
@@ -515,8 +517,6 @@ const AuthFlow: React.FC = () => {
             Don't have an account? Sign up
           </Button>
         </div>
-
-        <div id="recaptcha-container"></div>
       </CardContent>
     </Card>
   );

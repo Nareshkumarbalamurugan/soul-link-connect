@@ -1,25 +1,19 @@
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../config/firebase';
-import { collection, query, where, getDocs, addDoc, serverTimestamp, onSnapshot } from 'firebase/firestore';
+import { supabase } from '../integrations/supabase/client';
 import ProfileCard from './ProfileCard';
 import ChatWindow from './ChatWindow';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from './ui/select';
-import { useAuth } from '../contexts/AuthContext';
+import { useAuth } from '../contexts/SupabaseAuthContext';
 import { Phone, MessageCircle, Filter, MapPin, Star } from 'lucide-react';
 import { toast } from 'sonner';
-import { getCurrentLocation, sortHelpersByDistance, Location } from '../utils/geolocation';
+import type { Database } from '../integrations/supabase/types';
 
-interface Helper {
-  id: string;
-  name: string;
-  gender: string;
-  languages: string[];
-  location: string | Location;
-  isAvailable: boolean;
-  isOnline?: boolean;
+type Profile = Database['public']['Tables']['profiles']['Row'];
+
+interface Helper extends Profile {
   distance?: number | null;
 }
 
@@ -30,7 +24,7 @@ const SeekerDashboard: React.FC = () => {
   const [loading, setLoading] = useState(true);
   const [genderFilter, setGenderFilter] = useState<string>('all');
   const [languageFilter, setLanguageFilter] = useState<string>('all');
-  const [userLocation, setUserLocation] = useState<Location | null>(null);
+  const [userLocation, setUserLocation] = useState<{lat: number, lng: number} | null>(null);
   const [locationEnabled, setLocationEnabled] = useState(false);
   const [activeChat, setActiveChat] = useState<{chatId: string, otherUser: any} | null>(null);
 
@@ -40,28 +34,37 @@ const SeekerDashboard: React.FC = () => {
 
   useEffect(() => {
     // Set up real-time listener for helpers
-    const helpersQuery = query(
-      collection(db, 'users'),
-      where('role', '==', 'helper')
-    );
-    
-    const unsubscribe = onSnapshot(helpersQuery, (snapshot) => {
-      let helpersData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data()
-      } as Helper));
+    const fetchHelpers = async () => {
+      const { data, error } = await supabase
+        .from('profiles')
+        .select('*')
+        .eq('role', 'helper')
+        .order('is_online', { ascending: false });
 
-      // Sort helpers by distance (nearby first) if location is available
-      if (userLocation) {
-        helpersData = sortHelpersByDistance(helpersData, userLocation);
+      if (error) {
+        console.error('Error fetching helpers:', error);
+        toast.error('Failed to load helpers');
+      } else {
+        setHelpers(data as Helper[]);
       }
-      
-      setHelpers(helpersData);
       setLoading(false);
-    });
+    };
 
-    return () => unsubscribe();
-  }, [userLocation]);
+    fetchHelpers();
+
+    // Set up real-time subscription
+    const channel = supabase
+      .channel('profiles-changes')
+      .on('postgres_changes', 
+        { event: '*', schema: 'public', table: 'profiles', filter: 'role=eq.helper' },
+        () => fetchHelpers()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, []);
 
   useEffect(() => {
     filterHelpers();
@@ -69,8 +72,14 @@ const SeekerDashboard: React.FC = () => {
 
   const requestLocation = async () => {
     try {
-      const location = await getCurrentLocation();
-      setUserLocation(location);
+      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
+        navigator.geolocation.getCurrentPosition(resolve, reject);
+      });
+      
+      setUserLocation({
+        lat: position.coords.latitude,
+        lng: position.coords.longitude
+      });
       setLocationEnabled(true);
       toast.success('Location enabled! Showing nearby helpers first');
     } catch (error) {
@@ -101,18 +110,23 @@ const SeekerDashboard: React.FC = () => {
 
     try {
       // Create a new chat
-      const chatRef = await addDoc(collection(db, 'chats'), {
-        participants: [userProfile.id, helperId],
-        participantNames: [userProfile.name, helperName],
-        createdAt: serverTimestamp(),
-        lastMessage: '',
-        lastMessageTime: serverTimestamp()
-      });
+      const { data: chatData, error } = await supabase
+        .from('chats')
+        .insert({
+          participants: [userProfile.id, helperId],
+          participant_names: [userProfile.name, helperName],
+          last_message: '',
+          last_message_time: new Date().toISOString()
+        })
+        .select()
+        .single();
+
+      if (error) throw error;
 
       const helper = helpers.find(h => h.id === helperId);
       setActiveChat({
-        chatId: chatRef.id,
-        otherUser: { id: helperId, name: helperName, isOnline: helper?.isOnline }
+        chatId: chatData.id,
+        otherUser: { id: helperId, name: helperName, isOnline: helper?.is_online }
       });
 
       toast.success(`Starting chat with ${helperName}...`);
@@ -265,14 +279,13 @@ const SeekerDashboard: React.FC = () => {
                   )}
                   <ProfileCard
                     name={helper.name}
-                    gender={helper.gender}
+                    gender={helper.gender || 'other'}
                     languages={helper.languages}
-                    location={typeof helper.location === 'string' ? helper.location : 
-                      helper.distance !== null ? `${helper.distance} km away` : 'Location unknown'}
-                    isAvailable={helper.isAvailable && helper.isOnline}
+                    location={helper.location || 'Location unknown'}
+                    isAvailable={helper.is_available && helper.is_online}
                     onChat={() => handleChat(helper.id, helper.name)}
                     onCall={() => handleCall(helper.id, helper.name)}
-                    isOnline={helper.isOnline}
+                    isOnline={helper.is_online}
                   />
                 </div>
               ))}

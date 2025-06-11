@@ -1,27 +1,20 @@
 
 import React, { useState, useEffect } from 'react';
-import { db } from '../config/firebase';
-import { doc, updateDoc, collection, query, where, onSnapshot } from 'firebase/firestore';
-import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/SupabaseAuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Switch } from './ui/switch';
 import { Badge } from './ui/badge';
 import { MessageCircle, Phone, Users, Clock } from 'lucide-react';
 import { toast } from 'sonner';
+import type { Database } from '../integrations/supabase/types';
 
-interface SupportRequest {
-  id: string;
-  seekerId: string;
-  seekerName: string;
-  message: string;
-  timestamp: Date;
-  status: 'pending' | 'accepted' | 'completed';
-}
+type SupportRequest = Database['public']['Tables']['support_requests']['Row'];
 
 const HelperDashboard: React.FC = () => {
   const { userProfile } = useAuth();
-  const [isAvailable, setIsAvailable] = useState(userProfile?.isAvailable || false);
+  const [isAvailable, setIsAvailable] = useState(userProfile?.is_available || false);
   const [requests, setRequests] = useState<SupportRequest[]>([]);
   const [activeChats, setActiveChats] = useState(0);
   const [totalHelped, setTotalHelped] = useState(12); // Mock data
@@ -29,23 +22,35 @@ const HelperDashboard: React.FC = () => {
   useEffect(() => {
     if (userProfile?.id) {
       // Listen for real-time support requests
-      const requestsQuery = query(
-        collection(db, 'supportRequests'),
-        where('helperId', '==', userProfile.id)
-      );
-      
-      const unsubscribe = onSnapshot(requestsQuery, (snapshot) => {
-        const requestsData = snapshot.docs.map(doc => ({
-          id: doc.id,
-          ...doc.data(),
-          timestamp: doc.data().timestamp?.toDate() || new Date()
-        } as SupportRequest));
-        
-        setRequests(requestsData);
-        setActiveChats(requestsData.filter(req => req.status === 'accepted').length);
-      });
+      const fetchRequests = async () => {
+        const { data, error } = await supabase
+          .from('support_requests')
+          .select('*')
+          .eq('helper_id', userProfile.id)
+          .order('created_at', { ascending: false });
 
-      return () => unsubscribe();
+        if (error) {
+          console.error('Error fetching requests:', error);
+        } else {
+          setRequests(data);
+          setActiveChats(data.filter(req => req.status === 'accepted').length);
+        }
+      };
+
+      fetchRequests();
+
+      // Set up real-time subscription
+      const channel = supabase
+        .channel('support-requests-changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'support_requests', filter: `helper_id=eq.${userProfile.id}` },
+          () => fetchRequests()
+        )
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
     }
   }, [userProfile?.id]);
 
@@ -54,9 +59,12 @@ const HelperDashboard: React.FC = () => {
     
     try {
       const newStatus = !isAvailable;
-      await updateDoc(doc(db, 'users', userProfile.id), {
-        isAvailable: newStatus
-      });
+      const { error } = await supabase
+        .from('profiles')
+        .update({ is_available: newStatus })
+        .eq('id', userProfile.id);
+
+      if (error) throw error;
       
       setIsAvailable(newStatus);
       toast.success(newStatus ? 'You are now available to help' : 'You are now offline');
@@ -68,9 +76,12 @@ const HelperDashboard: React.FC = () => {
 
   const handleAcceptRequest = async (requestId: string) => {
     try {
-      await updateDoc(doc(db, 'supportRequests', requestId), {
-        status: 'accepted'
-      });
+      const { error } = await supabase
+        .from('support_requests')
+        .update({ status: 'accepted' })
+        .eq('id', requestId);
+
+      if (error) throw error;
       toast.success('Request accepted! Chat started.');
     } catch (error) {
       console.error('Error accepting request:', error);
@@ -80,9 +91,12 @@ const HelperDashboard: React.FC = () => {
 
   const handleDeclineRequest = async (requestId: string) => {
     try {
-      await updateDoc(doc(db, 'supportRequests', requestId), {
-        status: 'declined'
-      });
+      const { error } = await supabase
+        .from('support_requests')
+        .update({ status: 'declined' })
+        .eq('id', requestId);
+
+      if (error) throw error;
       toast.success('Request declined');
     } catch (error) {
       console.error('Error declining request:', error);
@@ -164,14 +178,14 @@ const HelperDashboard: React.FC = () => {
                     <div className="flex justify-between items-start">
                       <div className="flex-1">
                         <div className="flex items-center space-x-2 mb-2">
-                          <h4 className="font-semibold text-gray-800">{request.seekerName}</h4>
+                          <h4 className="font-semibold text-gray-800">{request.seeker_name}</h4>
                           <Badge variant="outline" className="bg-orange-100 text-orange-700">
                             New Request
                           </Badge>
                         </div>
                         <p className="text-gray-600 mb-3">{request.message}</p>
                         <p className="text-xs text-gray-500">
-                          {request.timestamp.toLocaleTimeString()}
+                          {new Date(request.created_at).toLocaleTimeString()}
                         </p>
                       </div>
                       <div className="flex space-x-2 ml-4">

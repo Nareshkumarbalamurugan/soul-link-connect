@@ -1,17 +1,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
-import { db } from '../config/firebase';
-import { 
-  collection, 
-  addDoc, 
-  query, 
-  orderBy, 
-  onSnapshot, 
-  serverTimestamp,
-  doc,
-  updateDoc
-} from 'firebase/firestore';
-import { useAuth } from '../contexts/AuthContext';
+import { supabase } from '../integrations/supabase/client';
+import { useAuth } from '../contexts/SupabaseAuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
@@ -19,14 +9,9 @@ import { Badge } from './ui/badge';
 import { Send, Phone, Video, X } from 'lucide-react';
 import { toast } from 'sonner';
 import VideoCall from './VideoCall';
+import type { Database } from '../integrations/supabase/types';
 
-interface Message {
-  id: string;
-  text: string;
-  senderId: string;
-  senderName: string;
-  timestamp: Date;
-}
+type Message = Database['public']['Tables']['messages']['Row'];
 
 interface ChatWindowProps {
   chatId: string;
@@ -47,22 +32,37 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    const messagesQuery = query(
-      collection(db, 'chats', chatId, 'messages'),
-      orderBy('timestamp', 'asc')
-    );
+    // Fetch existing messages
+    const fetchMessages = async () => {
+      const { data, error } = await supabase
+        .from('messages')
+        .select('*')
+        .eq('chat_id', chatId)
+        .order('created_at', { ascending: true });
 
-    const unsubscribe = onSnapshot(messagesQuery, (snapshot) => {
-      const messagesData = snapshot.docs.map(doc => ({
-        id: doc.id,
-        ...doc.data(),
-        timestamp: doc.data().timestamp?.toDate() || new Date()
-      } as Message));
-      
-      setMessages(messagesData);
-    });
+      if (error) {
+        console.error('Error fetching messages:', error);
+      } else {
+        setMessages(data);
+      }
+    };
 
-    return () => unsubscribe();
+    fetchMessages();
+
+    // Set up real-time subscription for new messages
+    const channel = supabase
+      .channel(`messages-${chatId}`)
+      .on('postgres_changes', 
+        { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
+        (payload) => {
+          setMessages(prev => [...prev, payload.new as Message]);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
   }, [chatId]);
 
   useEffect(() => {
@@ -79,18 +79,27 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
 
     setLoading(true);
     try {
-      await addDoc(collection(db, 'chats', chatId, 'messages'), {
-        text: newMessage.trim(),
-        senderId: userProfile.id,
-        senderName: userProfile.name,
-        timestamp: serverTimestamp()
-      });
+      const { error: messageError } = await supabase
+        .from('messages')
+        .insert({
+          chat_id: chatId,
+          text: newMessage.trim(),
+          sender_id: userProfile.id,
+          sender_name: userProfile.name
+        });
+
+      if (messageError) throw messageError;
 
       // Update chat's last message
-      await updateDoc(doc(db, 'chats', chatId), {
-        lastMessage: newMessage.trim(),
-        lastMessageTime: serverTimestamp()
-      });
+      const { error: chatError } = await supabase
+        .from('chats')
+        .update({
+          last_message: newMessage.trim(),
+          last_message_time: new Date().toISOString()
+        })
+        .eq('id', chatId);
+
+      if (chatError) throw chatError;
 
       setNewMessage('');
     } catch (error) {
@@ -163,18 +172,18 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
           {messages.map((message) => (
             <div
               key={message.id}
-              className={`flex ${message.senderId === userProfile?.id ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${message.sender_id === userProfile?.id ? 'justify-end' : 'justify-start'}`}
             >
               <div
                 className={`max-w-xs lg:max-w-md px-4 py-2 rounded-lg ${
-                  message.senderId === userProfile?.id
+                  message.sender_id === userProfile?.id
                     ? 'bg-purple-600 text-white'
                     : 'bg-gray-200 text-gray-800'
                 }`}
               >
                 <p className="text-sm">{message.text}</p>
                 <p className="text-xs opacity-75 mt-1">
-                  {message.timestamp.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  {new Date(message.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
                 </p>
               </div>
             </div>
