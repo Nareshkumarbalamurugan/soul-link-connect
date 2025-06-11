@@ -201,8 +201,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const login = async (email: string, password: string) => {
     try {
       console.log('Attempting login with email:', email);
-      const result = await signInWithEmailAndPassword(auth, email, password);
-      console.log('Login successful:', result.user.email);
+      await signInWithEmailAndPassword(auth, email, password);
+      console.log('Login successful - auth state will update automatically');
     } catch (error) {
       console.error('Login error:', error);
       throw error;
@@ -219,7 +219,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (user) => {
-      console.log('Auth state changed:', user?.email, user?.emailVerified);
+      console.log('Auth state changed:', user?.email, 'emailVerified:', user?.emailVerified);
       setCurrentUser(user);
       
       if (user) {
@@ -244,22 +244,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             });
             setUserProfile(profile);
             localStorage.removeItem('pendingProfile');
-          } else {
-            const userDoc = await getDoc(doc(db, 'users', user.uid));
-            if (userDoc.exists()) {
-              const profile = { ...userDoc.data(), emailVerified: user.emailVerified } as UserProfile;
-              setUserProfile(profile);
-              await updateOnlineStatus(user.uid, true);
-              
-              // Update email verification status in Firestore
-              if (user.emailVerified !== profile.emailVerified) {
-                await updateDoc(doc(db, 'users', user.uid), {
-                  emailVerified: user.emailVerified
-                });
-              }
-            } else {
-              setUserProfile(null);
+            setLoading(false);
+            return;
+          }
+
+          // Fetch existing user profile
+          const userDoc = await getDoc(doc(db, 'users', user.uid));
+          if (userDoc.exists()) {
+            const profile = { 
+              ...userDoc.data(), 
+              emailVerified: user.emailVerified 
+            } as UserProfile;
+            console.log('User profile loaded:', profile.name, profile.role);
+            setUserProfile(profile);
+            await updateOnlineStatus(user.uid, true);
+            
+            // Update email verification status in Firestore if changed
+            if (user.emailVerified !== profile.emailVerified) {
+              await updateDoc(doc(db, 'users', user.uid), {
+                emailVerified: user.emailVerified
+              });
             }
+          } else {
+            console.log('No user profile found - will show profile completion');
+            setUserProfile(null);
           }
         } catch (error) {
           console.error('Error fetching user profile:', error);

@@ -48,7 +48,7 @@ const EmailVerificationPrompt = ({ sendVerificationEmail }: { sendVerificationEm
               Please verify your email address to access your dashboard.
             </p>
             <p className="text-sm text-yellow-600 mb-4">
-              Check your email inbox and spam folder for the verification link.
+              Check your email inbox and <strong>spam folder</strong> for the verification link.
             </p>
             <div className="space-y-3">
               <Button
@@ -82,6 +82,8 @@ const EmailVerificationPrompt = ({ sendVerificationEmail }: { sendVerificationEm
 const Index = () => {
   const { currentUser, userProfile, sendVerificationEmail, loading } = useAuth();
 
+  console.log('Index render - loading:', loading, 'user:', currentUser?.email, 'profile:', userProfile?.name);
+
   // Show loading spinner while auth is initializing
   if (loading) {
     return <LoadingSpinner />;
@@ -89,6 +91,7 @@ const Index = () => {
 
   // Show auth flow if no user is logged in
   if (!currentUser) {
+    console.log('No current user - showing auth flow');
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
         <div className="container mx-auto px-4 py-8">
@@ -101,11 +104,13 @@ const Index = () => {
 
   // Show email verification notice if email is not verified (only for email users)
   if (currentUser.email && !currentUser.emailVerified) {
+    console.log('User email not verified - showing verification prompt');
     return <EmailVerificationPrompt sendVerificationEmail={sendVerificationEmail} />;
   }
 
-  // Show profile completion for users without profile (Google users, etc.)
+  // Show profile completion for users without profile
   if (!userProfile) {
+    console.log('No user profile - showing profile completion');
     return (
       <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
         <div className="container mx-auto px-4 py-8">
@@ -120,6 +125,7 @@ const Index = () => {
   }
 
   // Show main dashboard for verified users with complete profiles
+  console.log('Showing dashboard for user:', userProfile.name, 'role:', userProfile.role);
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">
       <Navbar />
