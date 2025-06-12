@@ -9,13 +9,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Checkbox } from './ui/checkbox';
 import RoleSelector from './RoleSelector';
 import { toast } from 'sonner';
-import { Mail, AlertCircle, Eye, EyeOff, Phone } from 'lucide-react';
+import { Mail, AlertCircle, Eye, EyeOff, Phone, ArrowLeft } from 'lucide-react';
 
-type FlowStep = 'role-selection' | 'registration' | 'login' | 'phone-verification';
+type FlowStep = 'role-selection' | 'registration' | 'login' | 'phone-verification' | 'reset-password';
 type AuthMethod = 'email' | 'phone';
 
 const AuthFlow: React.FC = () => {
-  const { login, signup, loginWithGoogle, loginWithPhone, verifyPhone, signupWithPhone, sendVerificationEmail } = useAuth();
+  const { login, signup, loginWithGoogle, loginWithPhone, verifyPhone, signupWithPhone, sendVerificationEmail, resetPassword } = useAuth();
   const [step, setStep] = useState<FlowStep>('role-selection');
   const [selectedRole, setSelectedRole] = useState<'seeker' | 'helper' | null>(null);
   const [authMethod, setAuthMethod] = useState<AuthMethod>('email');
@@ -42,10 +42,10 @@ const AuthFlow: React.FC = () => {
     setLoading(true);
     try {
       await loginWithGoogle();
-      toast.success('Successfully logged in with Google!');
+      toast.success('Redirecting to Google...');
     } catch (error: any) {
       console.error('Google login error:', error);
-      toast.error(error.message || 'Failed to login with Google. Try email login instead.');
+      toast.error(error.message || 'Failed to login with Google. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -92,7 +92,8 @@ const AuthFlow: React.FC = () => {
         toast.success('Verification code sent to your phone!');
       }
     } catch (error: any) {
-      toast.error(error.message || 'Registration failed');
+      console.error('Registration error:', error);
+      toast.error(error.message || 'Registration failed. Please try again.');
     }
     setLoading(false);
   };
@@ -112,7 +113,8 @@ const AuthFlow: React.FC = () => {
         toast.success('Verification code sent to your phone!');
       }
     } catch (error: any) {
-      toast.error(error.message || 'Login failed');
+      console.error('Login error:', error);
+      toast.error(error.message || 'Login failed. Please check your credentials.');
     }
     setLoading(false);
   };
@@ -125,7 +127,23 @@ const AuthFlow: React.FC = () => {
       await verifyPhone(verificationCode);
       toast.success('Phone verified successfully!');
     } catch (error: any) {
-      toast.error(error.message || 'Verification failed');
+      console.error('Verification error:', error);
+      toast.error(error.message || 'Verification failed. Please try again.');
+    }
+    setLoading(false);
+  };
+
+  const handleResetPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setLoading(true);
+    
+    try {
+      await resetPassword(formData.email);
+      toast.success('Password reset email sent! Check your inbox.');
+      setStep('login');
+    } catch (error: any) {
+      console.error('Reset password error:', error);
+      toast.error(error.message || 'Failed to send reset email. Please try again.');
     }
     setLoading(false);
   };
@@ -143,6 +161,53 @@ const AuthFlow: React.FC = () => {
       }));
     }
   };
+
+  // Reset password step
+  if (step === 'reset-password') {
+    return (
+      <Card className="w-full max-w-md mx-auto">
+        <CardHeader>
+          <CardTitle className="text-center text-2xl font-bold text-gray-800">
+            Reset Password
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={handleResetPassword} className="space-y-4">
+            <div>
+              <Label htmlFor="reset-email">Email Address</Label>
+              <Input
+                id="reset-email"
+                type="email"
+                value={formData.email}
+                onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                required
+                placeholder="Enter your email address"
+              />
+            </div>
+            
+            <Button 
+              type="submit" 
+              className="w-full bg-gradient-to-r from-purple-600 to-blue-600 hover:from-purple-700 hover:to-blue-700"
+              disabled={loading}
+            >
+              {loading ? 'Sending...' : 'Send Reset Email'}
+            </Button>
+          </form>
+          
+          <div className="mt-6 text-center">
+            <Button
+              variant="link"
+              onClick={() => setStep('login')}
+              className="text-gray-600 hover:text-gray-700"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Login
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   // Phone verification step
   if (step === 'phone-verification') {
@@ -176,6 +241,17 @@ const AuthFlow: React.FC = () => {
               {loading ? 'Verifying...' : 'Verify Code'}
             </Button>
           </form>
+          
+          <div className="mt-6 text-center">
+            <Button
+              variant="link"
+              onClick={() => setStep('login')}
+              className="text-gray-600 hover:text-gray-700"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Login
+            </Button>
+          </div>
         </CardContent>
       </Card>
     );
@@ -211,7 +287,6 @@ const AuthFlow: React.FC = () => {
           </CardTitle>
         </CardHeader>
         <CardContent>
-          {/* Google Registration */}
           <Button
             onClick={handleGoogleLogin}
             disabled={loading}
@@ -236,7 +311,6 @@ const AuthFlow: React.FC = () => {
             </div>
           </div>
 
-          {/* Auth Method Selection */}
           <div className="flex space-x-2 mb-4">
             <Button
               type="button"
@@ -401,7 +475,6 @@ const AuthFlow: React.FC = () => {
         </CardTitle>
       </CardHeader>
       <CardContent>
-        {/* Google Login */}
         <Button
           onClick={handleGoogleLogin}
           disabled={loading}
@@ -426,7 +499,6 @@ const AuthFlow: React.FC = () => {
           </div>
         </div>
 
-        {/* Auth Method Selection */}
         <div className="flex space-x-2 mb-4">
           <Button
             type="button"
@@ -508,7 +580,16 @@ const AuthFlow: React.FC = () => {
           </Button>
         </form>
         
-        <div className="mt-6 text-center">
+        <div className="mt-6 text-center space-y-2">
+          {authMethod === 'email' && (
+            <Button
+              variant="link"
+              onClick={() => setStep('reset-password')}
+              className="text-sm text-gray-600 hover:text-gray-700"
+            >
+              Forgot password?
+            </Button>
+          )}
           <Button
             variant="link"
             onClick={() => setStep('role-selection')}

@@ -19,6 +19,7 @@ interface AuthContextType {
   logout: () => Promise<void>;
   updateUserLocation: () => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
+  resetPassword: (email: string) => Promise<void>;
   loading: boolean;
 }
 
@@ -38,7 +39,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     if (!userProfile) return;
 
     try {
-      // Get current location
       const position = await new Promise<GeolocationPosition>((resolve, reject) => {
         navigator.geolocation.getCurrentPosition(resolve, reject);
       });
@@ -73,6 +73,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         console.error('Error sending verification email:', error);
         throw error;
       }
+    }
+  };
+
+  const resetPassword = async (email: string) => {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`
+      });
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error sending reset password email:', error);
+      throw error;
     }
   };
 
@@ -125,7 +137,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       if (error) throw error;
       
-      // Store profile data temporarily
       localStorage.setItem('pendingProfile', JSON.stringify({ ...profileData, phone: phoneNumber }));
       
       return 'OTP sent successfully';
@@ -180,28 +191,60 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUserProfile(null);
   };
 
+  // Set up online status tracking
   useEffect(() => {
-    // Get initial session
+    const updateOnlineStatus = async (isOnline: boolean) => {
+      if (userProfile) {
+        await supabase
+          .from('profiles')
+          .update({ 
+            is_online: isOnline, 
+            last_seen: new Date().toISOString() 
+          })
+          .eq('id', userProfile.id);
+      }
+    };
+
+    const handleOnline = () => updateOnlineStatus(true);
+    const handleOffline = () => updateOnlineStatus(false);
+    const handleBeforeUnload = () => updateOnlineStatus(false);
+
+    if (userProfile) {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      window.addEventListener('beforeunload', handleBeforeUnload);
+
+      // Set online when component mounts
+      updateOnlineStatus(true);
+
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        updateOnlineStatus(false);
+      };
+    }
+  }, [userProfile]);
+
+  useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setSession(session);
       setCurrentUser(session?.user ?? null);
     });
 
-    // Listen for auth changes
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('Auth state change:', event, session?.user?.email);
       setSession(session);
       setCurrentUser(session?.user ?? null);
       
       if (session?.user) {
         try {
-          // Check for pending phone profile
           const pendingProfile = localStorage.getItem('pendingProfile');
           if (pendingProfile && session.user.phone) {
             const profileData = JSON.parse(pendingProfile);
             localStorage.removeItem('pendingProfile');
           }
 
-          // Fetch user profile
           const { data: profile, error } = await supabase
             .from('profiles')
             .select('*')
@@ -212,12 +255,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             console.error('Error fetching profile:', error);
           } else if (profile) {
             setUserProfile(profile);
-            
-            // Update online status
-            await supabase
-              .from('profiles')
-              .update({ is_online: true, last_seen: new Date().toISOString() })
-              .eq('id', session.user.id);
           }
         } catch (error) {
           console.error('Error in auth state change:', error);
@@ -245,6 +282,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     logout,
     updateUserLocation,
     sendVerificationEmail,
+    resetPassword,
     loading
   };
 
