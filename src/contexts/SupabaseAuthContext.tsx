@@ -1,4 +1,3 @@
-
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { supabase } from '../integrations/supabase/client';
 import { User, Session } from '@supabase/supabase-js';
@@ -20,6 +19,7 @@ interface AuthContextType {
   updateUserLocation: () => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
   loading: boolean;
+  forgotPassword: (email: string) => Promise<void>; // <-- Add forgotPassword to AuthContextType
 }
 
 const AuthContext = createContext<AuthContextType>({} as AuthContextType);
@@ -180,6 +180,19 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUserProfile(null);
   };
 
+  // Add forgot password function
+  const forgotPassword = async (email: string) => {
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+    } catch (error) {
+      console.error('Forgot password error:', error);
+      throw error;
+    }
+  };
+
   useEffect(() => {
     // Get initial session
     supabase.auth.getSession().then(({ data: { session } }) => {
@@ -245,7 +258,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     logout,
     updateUserLocation,
     sendVerificationEmail,
-    loading
+    loading,
+    forgotPassword // add to context
   };
 
   return (
