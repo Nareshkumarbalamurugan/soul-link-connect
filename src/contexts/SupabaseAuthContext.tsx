@@ -231,23 +231,45 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
     const initializeAuth = async () => {
       try {
+        console.log('Initializing auth...');
+        
         // Get initial session
-        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
+        
+        if (sessionError) {
+          console.error('Session error:', sessionError);
+          if (mounted) setLoading(false);
+          return;
+        }
+        
+        console.log('Initial session:', initialSession?.user?.email);
         
         if (mounted) {
           setSession(initialSession);
           setCurrentUser(initialSession?.user ?? null);
           
           if (initialSession?.user) {
+            console.log('Fetching profile for user:', initialSession.user.id);
+            
             // Fetch user profile
-            const { data: profile, error } = await supabase
+            const { data: profile, error: profileError } = await supabase
               .from('profiles')
               .select('*')
               .eq('id', initialSession.user.id)
               .single();
 
-            if (mounted && !error && profile) {
-              setUserProfile(profile);
+            console.log('Profile fetch result:', { profile, error: profileError });
+
+            if (mounted) {
+              if (profileError) {
+                console.error('Profile fetch error:', profileError);
+                if (profileError.code === 'PGRST116') {
+                  console.log('No profile found for user');
+                }
+              } else if (profile) {
+                console.log('Profile loaded successfully:', profile.name);
+                setUserProfile(profile);
+              }
             }
           }
           
@@ -278,22 +300,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             localStorage.removeItem('pendingProfile');
           }
 
+          console.log('Fetching profile after auth change for:', session.user.id);
+          
           const { data: profile, error } = await supabase
             .from('profiles')
             .select('*')
             .eq('id', session.user.id)
             .single();
 
+          console.log('Profile fetch after auth change:', { profile, error });
+
           if (error && error.code !== 'PGRST116') {
             console.error('Error fetching profile:', error);
           } else if (profile) {
+            console.log('Setting profile:', profile.name);
             setUserProfile(profile);
+          } else {
+            console.log('No profile found, keeping null');
+            setUserProfile(null);
           }
         } catch (error) {
           console.error('Error in auth state change:', error);
         }
       } else {
+        console.log('No user, clearing profile');
         setUserProfile(null);
+      }
+      
+      // Set loading to false after handling auth state change
+      if (event !== 'INITIAL_SESSION') {
+        setLoading(false);
       }
     });
 

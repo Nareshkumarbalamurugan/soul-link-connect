@@ -33,6 +33,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
+    console.log('ChatWindow mounted for chat:', chatId);
     fetchMessages();
     
     // Set up real-time subscription for new messages
@@ -42,7 +43,14 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
         { event: 'INSERT', schema: 'public', table: 'messages', filter: `chat_id=eq.${chatId}` },
         (payload) => {
           console.log('New message received:', payload.new);
-          setMessages(prev => [...prev, payload.new as Message]);
+          const newMsg = payload.new as Message;
+          setMessages(prev => {
+            // Avoid duplicates
+            if (prev.some(msg => msg.id === newMsg.id)) {
+              return prev;
+            }
+            return [...prev, newMsg];
+          });
         }
       )
       .subscribe();
@@ -60,6 +68,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
       .subscribe();
 
     return () => {
+      console.log('Cleaning up chat subscriptions');
       supabase.removeChannel(messagesChannel);
       supabase.removeChannel(profilesChannel);
     };
@@ -71,6 +80,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
 
   const fetchMessages = async () => {
     try {
+      console.log('Fetching messages for chat:', chatId);
       const { data, error } = await supabase
         .from('messages')
         .select('*')
@@ -78,6 +88,7 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
         .order('created_at', { ascending: true });
 
       if (error) throw error;
+      console.log('Messages fetched:', data?.length || 0);
       setMessages(data || []);
     } catch (error) {
       console.error('Error fetching messages:', error);
@@ -98,16 +109,22 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
     setLoading(true);
     
     try {
-      const { error: messageError } = await supabase
+      console.log('Sending message:', messageText);
+      
+      const { data: messageData, error: messageError } = await supabase
         .from('messages')
         .insert({
           chat_id: chatId,
           text: messageText,
           sender_id: userProfile.id,
           sender_name: userProfile.name
-        });
+        })
+        .select()
+        .single();
 
       if (messageError) throw messageError;
+
+      console.log('Message sent successfully:', messageData);
 
       // Update chat's last message
       const { error: chatError } = await supabase
@@ -118,7 +135,9 @@ const ChatWindow: React.FC<ChatWindowProps> = ({ chatId, otherUser, onClose }) =
         })
         .eq('id', chatId);
 
-      if (chatError) throw chatError;
+      if (chatError) {
+        console.error('Error updating chat last message:', chatError);
+      }
 
     } catch (error) {
       console.error('Error sending message:', error);
