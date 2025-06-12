@@ -7,7 +7,7 @@ import { componentTagger } from "lovable-tagger";
 export default defineConfig(() => ({
   base: process.env.VITE_GITHUB_PAGES === "true" ? "/soul-link-connect/" : "/",
   server: {
-    host: "::",
+    host: "localhost",
     port: 8080,
   },
   plugins: [
