@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import { useAuth } from '../contexts/SupabaseAuthContext';
 import { Card, CardContent, CardHeader, CardTitle } from './ui/card';
@@ -78,7 +77,6 @@ const AuthFlow: React.FC = () => {
       } else {
         await signupWithPhone(formData.phone, {
           name: formData.name,
-          email: '',
           gender: formData.gender as 'male' | 'female' | 'other',
           languages: formData.languages,
           location: formData.location,

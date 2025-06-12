@@ -7,14 +7,16 @@ import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { Textarea } from './ui/textarea';
 import { Badge } from './ui/badge';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from './ui/dialog';
 import ProfileCard from './ProfileCard';
 import ChatWindow from './ChatWindow';
-import { MessageCircle, Search, Filter, Heart } from 'lucide-react';
+import { MessageCircle, Search, Filter, Heart, Users } from 'lucide-react';
 import { toast } from 'sonner';
 import type { Database } from '../integrations/supabase/types';
 
 type Profile = Database['public']['Tables']['profiles']['Row'];
 type Chat = Database['public']['Tables']['chats']['Row'];
+type SupportRequest = Database['public']['Tables']['support_requests']['Row'];
 
 const SeekerDashboard: React.FC = () => {
   const { userProfile } = useAuth();
@@ -23,13 +25,17 @@ const SeekerDashboard: React.FC = () => {
   const [selectedLanguage, setSelectedLanguage] = useState('');
   const [selectedChat, setSelectedChat] = useState<{ chatId: string; otherUser: { id: string; name: string; isOnline?: boolean } } | null>(null);
   const [activeChats, setActiveChats] = useState<Chat[]>([]);
+  const [supportRequests, setSupportRequests] = useState<SupportRequest[]>([]);
   const [supportMessage, setSupportMessage] = useState('');
+  const [selectedHelper, setSelectedHelper] = useState<Profile | null>(null);
+  const [isRequestDialogOpen, setIsRequestDialogOpen] = useState(false);
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
     if (userProfile?.id) {
       fetchHelpers();
       fetchActiveChats();
+      fetchSupportRequests();
       
       // Set up real-time subscription for helpers
       const helpersChannel = supabase
@@ -52,9 +58,19 @@ const SeekerDashboard: React.FC = () => {
         )
         .subscribe();
 
+      // Set up real-time subscription for support requests
+      const requestsChannel = supabase
+        .channel('support-requests-changes')
+        .on('postgres_changes', 
+          { event: '*', schema: 'public', table: 'support_requests', filter: `seeker_id=eq.${userProfile.id}` },
+          () => fetchSupportRequests()
+        )
+        .subscribe();
+
       return () => {
         supabase.removeChannel(helpersChannel);
         supabase.removeChannel(chatsChannel);
+        supabase.removeChannel(requestsChannel);
       };
     }
   }, [userProfile?.id]);
@@ -93,6 +109,23 @@ const SeekerDashboard: React.FC = () => {
     }
   };
 
+  const fetchSupportRequests = async () => {
+    if (!userProfile?.id) return;
+    
+    try {
+      const { data, error } = await supabase
+        .from('support_requests')
+        .select('*')
+        .eq('seeker_id', userProfile.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      setSupportRequests(data || []);
+    } catch (error) {
+      console.error('Error fetching support requests:', error);
+    }
+  };
+
   const filteredHelpers = helpers.filter(helper => {
     const matchesSearch = helper.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          helper.location?.toLowerCase().includes(searchTerm.toLowerCase());
@@ -100,7 +133,39 @@ const SeekerDashboard: React.FC = () => {
     return matchesSearch && matchesLanguage;
   });
 
-  const handleStartChat = async (helper: Profile) => {
+  const handleRequestSupport = async () => {
+    if (!userProfile || !supportMessage.trim() || !selectedHelper) {
+      toast.error('Please enter a message');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase
+        .from('support_requests')
+        .insert({
+          seeker_id: userProfile.id,
+          helper_id: selectedHelper.id,
+          seeker_name: userProfile.name,
+          message: supportMessage.trim(),
+          status: 'pending'
+        });
+
+      if (error) throw error;
+      
+      setSupportMessage('');
+      setIsRequestDialogOpen(false);
+      setSelectedHelper(null);
+      toast.success(`Support request sent to ${selectedHelper.name}!`);
+    } catch (error) {
+      console.error('Error sending support request:', error);
+      toast.error('Failed to send support request');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDirectChat = async (helper: Profile) => {
     if (!userProfile) return;
     
     setLoading(true);
@@ -160,36 +225,6 @@ const SeekerDashboard: React.FC = () => {
     window.open(`https://meet.jit.si/SoulLink-${roomId}`, '_blank');
   };
 
-  const handleRequestSupport = async (helper: Profile) => {
-    if (!userProfile || !supportMessage.trim()) {
-      toast.error('Please enter a message');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const { error } = await supabase
-        .from('support_requests')
-        .insert({
-          seeker_id: userProfile.id,
-          helper_id: helper.id,
-          seeker_name: userProfile.name,
-          message: supportMessage.trim(),
-          status: 'pending'
-        });
-
-      if (error) throw error;
-      
-      setSupportMessage('');
-      toast.success(`Support request sent to ${helper.name}!`);
-    } catch (error) {
-      console.error('Error sending support request:', error);
-      toast.error('Failed to send support request');
-    } finally {
-      setLoading(false);
-    }
-  };
-
   const openExistingChat = (chat: Chat) => {
     const otherUserId = chat.participants.find(id => id !== userProfile?.id);
     const otherUserName = chat.participant_names.find((name, index) => 
@@ -220,9 +255,38 @@ const SeekerDashboard: React.FC = () => {
   }
 
   const allLanguages = [...new Set(helpers.flatMap(helper => helper.languages))];
+  const pendingRequests = supportRequests.filter(req => req.status === 'pending').length;
+  const acceptedRequests = supportRequests.filter(req => req.status === 'accepted').length;
 
   return (
     <div className="space-y-6">
+      {/* Stats Cards */}
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <Card>
+          <CardContent className="p-6 text-center">
+            <MessageCircle className="w-10 h-10 text-blue-600 mx-auto mb-3" />
+            <h3 className="text-2xl font-bold text-gray-800">{activeChats.length}</h3>
+            <p className="text-gray-600">Active Chats</p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-6 text-center">
+            <Users className="w-10 h-10 text-orange-600 mx-auto mb-3" />
+            <h3 className="text-2xl font-bold text-gray-800">{pendingRequests}</h3>
+            <p className="text-gray-600">Pending Requests</p>
+          </CardContent>
+        </Card>
+        
+        <Card>
+          <CardContent className="p-6 text-center">
+            <Heart className="w-10 h-10 text-green-600 mx-auto mb-3" />
+            <h3 className="text-2xl font-bold text-gray-800">{acceptedRequests}</h3>
+            <p className="text-gray-600">Connected Helpers</p>
+          </CardContent>
+        </Card>
+      </div>
+
       {/* Active Chats */}
       {activeChats.length > 0 && (
         <Card>
@@ -318,52 +382,138 @@ const SeekerDashboard: React.FC = () => {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
               {filteredHelpers.map((helper) => (
-                <ProfileCard
-                  key={helper.id}
-                  name={helper.name}
-                  gender={helper.gender || 'other'}
-                  languages={helper.languages}
-                  location={helper.location || 'Unknown'}
-                  isAvailable={helper.is_available || false}
-                  isOnline={helper.is_online || false}
-                  onChat={() => handleStartChat(helper)}
-                  onCall={() => handleCall(helper)}
-                />
+                <div key={helper.id} className="border rounded-lg p-4 space-y-3">
+                  <div className="flex items-center space-x-3">
+                    <div className="w-12 h-12 bg-purple-200 rounded-full flex items-center justify-center relative">
+                      <span className="text-purple-800 font-semibold text-lg">
+                        {helper.name.charAt(0).toUpperCase()}
+                      </span>
+                      <div className={`absolute -bottom-1 -right-1 w-3 h-3 rounded-full border-2 border-white ${
+                        helper.is_online ? 'bg-green-500' : 'bg-gray-400'
+                      }`} />
+                    </div>
+                    <div>
+                      <h3 className="font-semibold">{helper.name}</h3>
+                      <div className="flex space-x-2">
+                        <Badge variant={helper.is_available ? "default" : "secondary"} className="text-xs">
+                          {helper.is_available ? 'Available' : 'Busy'}
+                        </Badge>
+                        <Badge variant={helper.is_online ? "default" : "secondary"} className="text-xs">
+                          {helper.is_online ? 'Online' : 'Offline'}
+                        </Badge>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  <div className="space-y-2">
+                    <p className="text-sm text-gray-600">
+                      <strong>Languages:</strong> {helper.languages.join(', ')}
+                    </p>
+                    <p className="text-sm text-gray-600">
+                      <strong>Location:</strong> {helper.location || 'Not specified'}
+                    </p>
+                  </div>
+                  
+                  <div className="flex space-x-2">
+                    <Button
+                      onClick={() => handleDirectChat(helper)}
+                      disabled={loading || !helper.is_available}
+                      size="sm"
+                      className="flex-1"
+                    >
+                      <MessageCircle className="w-4 h-4 mr-1" />
+                      Chat
+                    </Button>
+                    <Dialog open={isRequestDialogOpen && selectedHelper?.id === helper.id} onOpenChange={setIsRequestDialogOpen}>
+                      <DialogTrigger asChild>
+                        <Button
+                          onClick={() => setSelectedHelper(helper)}
+                          variant="outline"
+                          size="sm"
+                          className="flex-1"
+                        >
+                          Request Help
+                        </Button>
+                      </DialogTrigger>
+                      <DialogContent>
+                        <DialogHeader>
+                          <DialogTitle>Request Support from {helper.name}</DialogTitle>
+                        </DialogHeader>
+                        <div className="space-y-4">
+                          <Textarea
+                            placeholder="Describe what kind of support you're looking for..."
+                            value={supportMessage}
+                            onChange={(e) => setSupportMessage(e.target.value)}
+                            rows={4}
+                          />
+                          <div className="flex space-x-2">
+                            <Button
+                              onClick={handleRequestSupport}
+                              disabled={loading || !supportMessage.trim()}
+                              className="flex-1"
+                            >
+                              {loading ? 'Sending...' : 'Send Request'}
+                            </Button>
+                            <Button
+                              onClick={() => {
+                                setIsRequestDialogOpen(false);
+                                setSelectedHelper(null);
+                                setSupportMessage('');
+                              }}
+                              variant="outline"
+                              className="flex-1"
+                            >
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      </DialogContent>
+                    </Dialog>
+                  </div>
+                </div>
               ))}
             </div>
           )}
         </CardContent>
       </Card>
 
-      {/* Quick Request Support */}
-      <Card>
-        <CardHeader>
-          <CardTitle>Quick Support Request</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <div className="space-y-4">
-            <Textarea
-              placeholder="Describe what kind of support you're looking for..."
-              value={supportMessage}
-              onChange={(e) => setSupportMessage(e.target.value)}
-              rows={3}
-            />
-            <div className="flex space-x-2">
-              {filteredHelpers.slice(0, 3).map((helper) => (
-                <Button
-                  key={helper.id}
-                  onClick={() => handleRequestSupport(helper)}
-                  disabled={loading || !supportMessage.trim() || !helper.is_available}
-                  variant="outline"
-                  className="flex-1"
-                >
-                  Request from {helper.name}
-                </Button>
-              ))}
+      {/* Support Requests Status */}
+      {supportRequests.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>Your Support Requests</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="space-y-3">
+              {supportRequests.slice(0, 5).map((request) => {
+                const helper = helpers.find(h => h.id === request.helper_id);
+                return (
+                  <div key={request.id} className="p-3 border rounded-lg">
+                    <div className="flex justify-between items-start">
+                      <div>
+                        <h4 className="font-medium">Request to {helper?.name || 'Helper'}</h4>
+                        <p className="text-sm text-gray-600 mt-1">{request.message}</p>
+                        <p className="text-xs text-gray-500 mt-2">
+                          {new Date(request.created_at).toLocaleString()}
+                        </p>
+                      </div>
+                      <Badge 
+                        variant={
+                          request.status === 'accepted' ? 'default' : 
+                          request.status === 'pending' ? 'secondary' : 
+                          'destructive'
+                        }
+                      >
+                        {request.status}
+                      </Badge>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
-          </div>
-        </CardContent>
-      </Card>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 };

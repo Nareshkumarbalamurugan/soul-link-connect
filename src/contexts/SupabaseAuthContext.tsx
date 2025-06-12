@@ -79,7 +79,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const resetPassword = async (email: string) => {
     try {
       const { error } = await supabase.auth.resetPasswordForEmail(email, {
-        redirectTo: `${window.location.origin}/reset-password`
+        redirectTo: `${window.location.origin}/`
       });
       if (error) throw error;
     } catch (error) {
@@ -227,13 +227,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   }, [userProfile]);
 
   useEffect(() => {
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setCurrentUser(session?.user ?? null);
-    });
+    let mounted = true;
 
+    const initializeAuth = async () => {
+      try {
+        // Get initial session
+        const { data: { session: initialSession } } = await supabase.auth.getSession();
+        
+        if (mounted) {
+          setSession(initialSession);
+          setCurrentUser(initialSession?.user ?? null);
+          
+          if (initialSession?.user) {
+            // Fetch user profile
+            const { data: profile, error } = await supabase
+              .from('profiles')
+              .select('*')
+              .eq('id', initialSession.user.id)
+              .single();
+
+            if (mounted && !error && profile) {
+              setUserProfile(profile);
+            }
+          }
+          
+          setLoading(false);
+        }
+      } catch (error) {
+        console.error('Error initializing auth:', error);
+        if (mounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('Auth state change:', event, session?.user?.email);
+      
+      if (!mounted) return;
+
       setSession(session);
       setCurrentUser(session?.user ?? null);
       
@@ -262,11 +295,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       } else {
         setUserProfile(null);
       }
-      
-      setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
+    initializeAuth();
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const value = {
