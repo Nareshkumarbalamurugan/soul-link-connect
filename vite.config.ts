@@ -4,15 +4,15 @@ import path from "path";
 import { componentTagger } from "lovable-tagger";
 
 // https://vitejs.dev/config/
-export default defineConfig(({ mode }) => ({
-  base: '/soul-link-connect/', // Set base for GitHub Pages
+export default defineConfig(() => ({
+  base: process.env.VITE_GITHUB_PAGES === "true" ? "/soul-link-connect/" : "/",
   server: {
     host: "::",
     port: 8080,
   },
   plugins: [
     react(),
-    mode === 'development' &&
+    process.env.NODE_ENV === 'development' &&
     componentTagger(),
   ].filter(Boolean),
   resolve: {

@@ -71,3 +71,27 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+
+## Local Development
+
+To run the app locally:
+
+```sh
+npm install
+npm run dev
+```
+
+The app will be available at http://localhost:8080/ by default.
+
+## Deploy to GitHub Pages
+
+To deploy to GitHub Pages:
+
+```sh
+npm run build
+npm run deploy
+```
+
+Your site will be available at: https://nareshkumarbalamurugan.github.io/soul-link-connect/
+
+The Vite config is set up to use the correct base path for both local and GitHub Pages hosting.
