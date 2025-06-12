@@ -84,12 +84,10 @@ const Index = () => {
 
   console.log('Index render - loading:', loading, 'user:', currentUser?.email, 'profile:', userProfile?.name);
 
-  // Show loading spinner while auth is initializing
   if (loading) {
     return <LoadingSpinner />;
   }
 
-  // Show auth flow if no user is logged in
   if (!currentUser) {
     console.log('No current user - showing auth flow');
     return (
@@ -102,13 +100,11 @@ const Index = () => {
     );
   }
 
-  // Show email verification notice if email is not verified (only for email users)
   if (currentUser.email && !currentUser.email_confirmed_at) {
     console.log('User email not verified - showing verification prompt');
     return <EmailVerificationPrompt sendVerificationEmail={sendVerificationEmail} />;
   }
 
-  // Show profile completion for users without profile
   if (!userProfile) {
     console.log('No user profile - showing profile completion');
     return (
@@ -124,7 +120,6 @@ const Index = () => {
     );
   }
 
-  // Show main dashboard for verified users with complete profiles
   console.log('Showing dashboard for user:', userProfile.name, 'role:', userProfile.role);
   return (
     <div className="min-h-screen bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50">

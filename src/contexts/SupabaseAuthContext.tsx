@@ -12,12 +12,8 @@ interface AuthContextType {
   userProfile: Profile | null;
   login: (email: string, password: string) => Promise<void>;
   loginWithGoogle: () => Promise<void>;
-  loginWithPhone: (phoneNumber: string) => Promise<string>;
-  verifyPhone: (token: string) => Promise<void>;
-  signup: (email: string, password: string, profileData: Omit<Profile, 'id' | 'email' | 'created_at' | 'updated_at'>) => Promise<void>;
-  signupWithPhone: (phoneNumber: string, profileData: Omit<Profile, 'id' | 'email' | 'phone' | 'created_at' | 'updated_at'>) => Promise<string>;
+  signup: (email: string, password: string, profileData: { name: string; gender: string; languages: string[]; location: string; role: string; is_available: boolean }) => Promise<void>;
   logout: () => Promise<void>;
-  updateUserLocation: () => Promise<void>;
   sendVerificationEmail: () => Promise<void>;
   resetPassword: (email: string) => Promise<void>;
   loading: boolean;
@@ -34,29 +30,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [session, setSession] = useState<Session | null>(null);
   const [userProfile, setUserProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
-
-  const updateUserLocation = async () => {
-    if (!userProfile) return;
-
-    try {
-      const position = await new Promise<GeolocationPosition>((resolve, reject) => {
-        navigator.geolocation.getCurrentPosition(resolve, reject);
-      });
-      
-      const location = `${position.coords.latitude}, ${position.coords.longitude}`;
-      
-      const { error } = await supabase
-        .from('profiles')
-        .update({ location })
-        .eq('id', userProfile.id);
-
-      if (error) throw error;
-      
-      setUserProfile(prev => prev ? { ...prev, location } : null);
-    } catch (error) {
-      console.error('Error updating location:', error);
-    }
-  };
 
   const sendVerificationEmail = async () => {
     if (currentUser && !currentUser.email_confirmed_at) {
@@ -103,64 +76,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const loginWithPhone = async (phoneNumber: string): Promise<string> => {
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: phoneNumber
-      });
-      if (error) throw error;
-      return 'OTP sent successfully';
-    } catch (error) {
-      console.error('Error with phone login:', error);
-      throw error;
-    }
-  };
-
-  const verifyPhone = async (token: string) => {
-    try {
-      const { error } = await supabase.auth.verifyOtp({
-        phone: session?.user?.phone || '',
-        token,
-        type: 'sms'
-      });
-      if (error) throw error;
-    } catch (error) {
-      console.error('Error verifying phone:', error);
-      throw error;
-    }
-  };
-
-  const signupWithPhone = async (phoneNumber: string, profileData: Omit<Profile, 'id' | 'email' | 'phone' | 'created_at' | 'updated_at'>): Promise<string> => {
-    try {
-      const { error } = await supabase.auth.signInWithOtp({
-        phone: phoneNumber
-      });
-      if (error) throw error;
-      
-      localStorage.setItem('pendingProfile', JSON.stringify({ ...profileData, phone: phoneNumber }));
-      
-      return 'OTP sent successfully';
-    } catch (error) {
-      console.error('Error with phone signup:', error);
-      throw error;
-    }
-  };
-
-  const signup = async (email: string, password: string, profileData: Omit<Profile, 'id' | 'email' | 'created_at' | 'updated_at'>) => {
+  const signup = async (email: string, password: string, profileData: { name: string; gender: string; languages: string[]; location: string; role: string; is_available: boolean }) => {
     const { error } = await supabase.auth.signUp({
       email,
       password,
       options: {
         emailRedirectTo: `${window.location.origin}/`,
-        data: {
-          ...profileData,
-          name: profileData.name,
-          gender: profileData.gender,
-          languages: profileData.languages,
-          location: profileData.location,
-          role: profileData.role,
-          isAvailable: profileData.is_available
-        }
+        data: profileData
       }
     });
     
@@ -191,41 +113,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUserProfile(null);
   };
 
-  // Set up online status tracking
-  useEffect(() => {
-    const updateOnlineStatus = async (isOnline: boolean) => {
-      if (userProfile) {
-        await supabase
-          .from('profiles')
-          .update({ 
-            is_online: isOnline, 
-            last_seen: new Date().toISOString() 
-          })
-          .eq('id', userProfile.id);
-      }
-    };
-
-    const handleOnline = () => updateOnlineStatus(true);
-    const handleOffline = () => updateOnlineStatus(false);
-    const handleBeforeUnload = () => updateOnlineStatus(false);
-
-    if (userProfile) {
-      window.addEventListener('online', handleOnline);
-      window.addEventListener('offline', handleOffline);
-      window.addEventListener('beforeunload', handleBeforeUnload);
-
-      // Set online when component mounts
-      updateOnlineStatus(true);
-
-      return () => {
-        window.removeEventListener('online', handleOnline);
-        window.removeEventListener('offline', handleOffline);
-        window.removeEventListener('beforeunload', handleBeforeUnload);
-        updateOnlineStatus(false);
-      };
-    }
-  }, [userProfile]);
-
   useEffect(() => {
     let mounted = true;
 
@@ -233,7 +120,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       try {
         console.log('Initializing auth...');
         
-        // Get initial session
         const { data: { session: initialSession }, error: sessionError } = await supabase.auth.getSession();
         
         if (sessionError) {
@@ -251,7 +137,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           if (initialSession?.user) {
             console.log('Fetching profile for user:', initialSession.user.id);
             
-            // Fetch user profile
             const { data: profile, error: profileError } = await supabase
               .from('profiles')
               .select('*')
@@ -283,7 +168,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     };
 
-    // Set up auth state listener
     const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, session) => {
       console.log('Auth state change:', event, session?.user?.email);
       
@@ -294,12 +178,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       
       if (session?.user) {
         try {
-          const pendingProfile = localStorage.getItem('pendingProfile');
-          if (pendingProfile && session.user.phone) {
-            const profileData = JSON.parse(pendingProfile);
-            localStorage.removeItem('pendingProfile');
-          }
-
           console.log('Fetching profile after auth change for:', session.user.id);
           
           const { data: profile, error } = await supabase
@@ -327,7 +205,6 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         setUserProfile(null);
       }
       
-      // Set loading to false after handling auth state change
       if (event !== 'INITIAL_SESSION') {
         setLoading(false);
       }
@@ -341,18 +218,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
+  // Set up online status tracking
+  useEffect(() => {
+    const updateOnlineStatus = async (isOnline: boolean) => {
+      if (userProfile) {
+        await supabase
+          .from('profiles')
+          .update({ 
+            is_online: isOnline, 
+            last_seen: new Date().toISOString() 
+          })
+          .eq('id', userProfile.id);
+      }
+    };
+
+    const handleOnline = () => updateOnlineStatus(true);
+    const handleOffline = () => updateOnlineStatus(false);
+    const handleBeforeUnload = () => updateOnlineStatus(false);
+
+    if (userProfile) {
+      window.addEventListener('online', handleOnline);
+      window.addEventListener('offline', handleOffline);
+      window.addEventListener('beforeunload', handleBeforeUnload);
+
+      updateOnlineStatus(true);
+
+      return () => {
+        window.removeEventListener('online', handleOnline);
+        window.removeEventListener('offline', handleOffline);
+        window.removeEventListener('beforeunload', handleBeforeUnload);
+        updateOnlineStatus(false);
+      };
+    }
+  }, [userProfile]);
+
   const value = {
     currentUser,
     session,
     userProfile,
     login,
     loginWithGoogle,
-    loginWithPhone,
-    verifyPhone,
     signup,
-    signupWithPhone,
     logout,
-    updateUserLocation,
     sendVerificationEmail,
     resetPassword,
     loading
